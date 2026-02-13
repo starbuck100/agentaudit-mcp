@@ -992,6 +992,10 @@ async function auditRepo(url) {
     console.log(`  ${c.dim}$env:ANTHROPIC_API_KEY = "sk-ant-..."${c.reset}`);
     console.log(`  ${c.dim}$env:OPENAI_API_KEY = "sk-..."${c.reset}`);
     console.log();
+    console.log(`  ${c.dim}# Windows (CMD):${c.reset}`);
+    console.log(`  ${c.dim}set ANTHROPIC_API_KEY=sk-ant-...${c.reset}`);
+    console.log(`  ${c.dim}set OPENAI_API_KEY=sk-...${c.reset}`);
+    console.log();
     console.log(`  ${c.bold}Option 2: Export for manual review${c.reset}`);
     console.log(`  ${c.cyan}agentaudit audit ${url} --export${c.reset}`);
     console.log(`  ${c.dim}Creates a markdown file you can paste into any LLM (Claude, ChatGPT, etc.)${c.reset}`);
@@ -1223,7 +1227,9 @@ async function main() {
     console.log();
     console.log(`  ${c.bold}For deep audits,${c.reset} set an LLM API key:`);
     if (process.platform === 'win32') {
-      console.log(`    ${c.dim}set ANTHROPIC_API_KEY=sk-ant-...${c.reset}    ${c.dim}(or OPENAI_API_KEY)${c.reset}`);
+      console.log(`    ${c.dim}PowerShell:  $env:ANTHROPIC_API_KEY = "sk-ant-..."${c.reset}`);
+      console.log(`    ${c.dim}CMD:         set ANTHROPIC_API_KEY=sk-ant-...${c.reset}`);
+      console.log(`    ${c.dim}(or use OPENAI_API_KEY instead)${c.reset}`);
     } else {
       console.log(`    ${c.dim}export ANTHROPIC_API_KEY=sk-ant-...${c.reset}    ${c.dim}(or OPENAI_API_KEY)${c.reset}`);
     }
