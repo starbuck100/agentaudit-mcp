@@ -587,7 +587,29 @@ async function checkRegistry(slug) {
 // ── Print results ───────────────────────────────────────
 
 function printScanResult(url, info, files, findings, registryData, duration) {
+  if (jsonMode) return; // JSON mode handles output separately
+  
   const slug = slugFromUrl(url);
+  
+  // Quiet mode: compact one-line-per-package output
+  if (quietMode) {
+    if (findings.length > 0) {
+      const bySev = {};
+      for (const f of findings) { bySev[f.severity] = (bySev[f.severity] || 0) + 1; }
+      const sevStr = Object.entries(bySev).map(([s, n]) => {
+        const sc = severityColor(s);
+        return `${sc}${n} ${s}${c.reset}`;
+      }).join(', ');
+      console.log(`${icons.caution}  ${c.bold}${slug}${c.reset}  ${findings.length} findings (${sevStr})  ${c.dim}${duration}${c.reset}`);
+      for (const f of findings) {
+        const sc = severityColor(f.severity);
+        console.log(`   ${severityIcon(f.severity)} ${sc}${f.severity.toUpperCase().padEnd(8)}${c.reset} ${f.title}  ${c.dim}${f.file}:${f.line}${c.reset}`);
+      }
+    } else {
+      console.log(`${icons.safe}  ${c.bold}${slug}${c.reset}  ${c.green}clean${c.reset}  ${c.dim}${files.length} files, ${duration}${c.reset}`);
+    }
+    return;
+  }
   
   // Header
   console.log(`${icons.scan}  ${c.bold}${slug}${c.reset}  ${c.dim}${url}${c.reset}`);
@@ -1590,10 +1612,11 @@ async function main() {
     }
     
     const results = [];
+    let hadErrors = false;
     for (const url of urls) {
       const result = await scanRepo(url);
       if (result) results.push(result);
-      else process.exitCode = 2;
+      else hadErrors = true;
     }
     
     if (jsonMode) {
@@ -1615,6 +1638,7 @@ async function main() {
       printSummary(results);
     }
     
+    if (hadErrors && results.length === 0) process.exit(2);
     const totalFindings = results.reduce((sum, r) => sum + r.findings.length, 0);
     process.exit(totalFindings > 0 ? 1 : 0);
     return;
