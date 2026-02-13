@@ -780,7 +780,7 @@ async function discoverCommand() {
       } else {
         unauditedServers++;
         console.log(`${branch}  ${c.bold}${server.name}${c.reset}    ${sourceLabel}`);
-        console.log(`${pipe}  ${c.yellow}⚠ not audited${c.reset}  ${c.dim}Run: agentaudit scan <source-url>${c.reset}`);
+        console.log(`${pipe}  ${c.yellow}⚠ not audited${c.reset}  ${c.dim}Run: agentaudit audit <source-url>${c.reset}`);
       }
       
       if (server.sourceUrl) {
@@ -806,6 +806,236 @@ async function discoverCommand() {
   }
 }
 
+// ── Audit command (deep LLM-powered) ────────────────────
+
+function loadAuditPrompt() {
+  const promptPath = path.join(SKILL_DIR, 'prompts', 'audit-prompt.md');
+  if (fs.existsSync(promptPath)) return fs.readFileSync(promptPath, 'utf8');
+  return null;
+}
+
+async function auditRepo(url) {
+  const start = Date.now();
+  const slug = slugFromUrl(url);
+  
+  console.log(`${icons.scan}  ${c.bold}Auditing ${slug}${c.reset}  ${c.dim}${url}${c.reset}`);
+  console.log(`${icons.pipe}  ${c.dim}Deep LLM-powered analysis (3-pass: UNDERSTAND → DETECT → CLASSIFY)${c.reset}`);
+  console.log();
+  
+  // Step 1: Clone
+  process.stdout.write(`  ${c.dim}[1/4]${c.reset} Cloning repository...`);
+  const tmpDir = fs.mkdtempSync('/tmp/agentaudit-');
+  const repoPath = path.join(tmpDir, 'repo');
+  try {
+    execSync(`git clone --depth 1 "${url}" "${repoPath}" 2>/dev/null`, {
+      timeout: 30_000, stdio: 'pipe',
+    });
+    console.log(` ${c.green}done${c.reset}`);
+  } catch {
+    console.log(` ${c.red}failed${c.reset}`);
+    return null;
+  }
+  
+  // Step 2: Collect files
+  process.stdout.write(`  ${c.dim}[2/4]${c.reset} Collecting source files...`);
+  const files = collectFiles(repoPath);
+  console.log(` ${c.green}${files.length} files${c.reset}`);
+  
+  // Step 3: Build audit payload
+  process.stdout.write(`  ${c.dim}[3/4]${c.reset} Preparing audit payload...`);
+  const auditPrompt = loadAuditPrompt();
+  
+  let codeBlock = '';
+  for (const file of files) {
+    codeBlock += `\n### FILE: ${file.path}\n\`\`\`\n${file.content}\n\`\`\`\n`;
+  }
+  console.log(` ${c.green}done${c.reset}`);
+  
+  // Step 4: LLM Analysis
+  // Check for API keys to determine which LLM to use
+  const anthropicKey = process.env.ANTHROPIC_API_KEY;
+  const openaiKey = process.env.OPENAI_API_KEY;
+  
+  if (!anthropicKey && !openaiKey) {
+    // No LLM API key — output the prepared audit for piping or MCP use
+    console.log();
+    console.log(`  ${c.yellow}No LLM API key found.${c.reset} To run the audit automatically, set one of:`);
+    console.log(`    ${c.dim}export ANTHROPIC_API_KEY=sk-ant-...${c.reset}`);
+    console.log(`    ${c.dim}export OPENAI_API_KEY=sk-...${c.reset}`);
+    console.log();
+    console.log(`  ${c.bold}Alternatives:${c.reset}`);
+    console.log(`    ${c.dim}1.${c.reset} Use the MCP server in Claude/Cursor — your agent runs the audit automatically`);
+    console.log(`    ${c.dim}2.${c.reset} Export for manual review: ${c.cyan}agentaudit audit ${url} --export${c.reset}`);
+    console.log();
+    
+    // Check if --export flag
+    if (process.argv.includes('--export')) {
+      const exportPath = path.join(process.cwd(), `audit-${slug}.md`);
+      const exportContent = [
+        `# Security Audit: ${slug}`,
+        `**Source:** ${url}`,
+        `**Files:** ${files.length}`,
+        ``,
+        `## Audit Instructions`,
+        ``,
+        auditPrompt || '(audit prompt not found)',
+        ``,
+        `## Report Format`,
+        ``,
+        `After analysis, produce a JSON report:`,
+        '```json',
+        `{ "skill_slug": "${slug}", "source_url": "${url}", "risk_score": 0, "result": "safe", "findings": [] }`,
+        '```',
+        ``,
+        `## Source Code`,
+        ``,
+        codeBlock,
+      ].join('\n');
+      fs.writeFileSync(exportPath, exportContent);
+      console.log(`  ${icons.safe}  Exported to ${c.bold}${exportPath}${c.reset}`);
+      console.log(`  ${c.dim}Paste this into any LLM (Claude, ChatGPT, etc.) for analysis${c.reset}`);
+    }
+    
+    // Cleanup
+    try { execSync(`rm -rf "${tmpDir}"`, { stdio: 'pipe' }); } catch {}
+    return null;
+  }
+  
+  // We have an API key — run LLM audit
+  process.stdout.write(`  ${c.dim}[4/4]${c.reset} Running LLM analysis...`);
+  
+  const systemPrompt = auditPrompt || 'You are a security auditor. Analyze the code and report findings as JSON.';
+  const userMessage = [
+    `Audit this package: **${slug}** (${url})`,
+    ``,
+    `After analysis, respond with ONLY a JSON object (no markdown, no explanation):`,
+    '```',
+    `{ "skill_slug": "${slug}", "source_url": "${url}", "package_type": "<mcp-server|agent-skill|library|cli-tool>",`,
+    `  "risk_score": <0-100>, "result": "<safe|caution|unsafe>", "max_severity": "<none|low|medium|high|critical>",`,
+    `  "findings_count": <n>, "findings": [{ "id": "...", "title": "...", "severity": "...", "category": "...",`,
+    `  "description": "...", "file": "...", "line": <n>, "remediation": "...", "confidence": "...", "is_by_design": false }] }`,
+    '```',
+    ``,
+    `## Source Code`,
+    codeBlock,
+  ].join('\n');
+  
+  let report = null;
+  
+  try {
+    if (anthropicKey) {
+      const res = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'x-api-key': anthropicKey,
+          'anthropic-version': '2023-06-01',
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-20250514',
+          max_tokens: 8192,
+          system: systemPrompt,
+          messages: [{ role: 'user', content: userMessage }],
+        }),
+        signal: AbortSignal.timeout(120_000),
+      });
+      const data = await res.json();
+      const text = data.content?.[0]?.text || '';
+      // Extract JSON from response
+      const jsonMatch = text.match(/\{[\s\S]*\}/);
+      if (jsonMatch) report = JSON.parse(jsonMatch[0]);
+    } else if (openaiKey) {
+      const res = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${openaiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: 'gpt-4o',
+          max_tokens: 8192,
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: userMessage },
+          ],
+        }),
+        signal: AbortSignal.timeout(120_000),
+      });
+      const data = await res.json();
+      const text = data.choices?.[0]?.message?.content || '';
+      const jsonMatch = text.match(/\{[\s\S]*\}/);
+      if (jsonMatch) report = JSON.parse(jsonMatch[0]);
+    }
+    
+    console.log(` ${c.green}done${c.reset} ${c.dim}(${elapsed(start)})${c.reset}`);
+  } catch (err) {
+    console.log(` ${c.red}failed${c.reset}`);
+    console.log(`  ${c.red}${err.message}${c.reset}`);
+    try { execSync(`rm -rf "${tmpDir}"`, { stdio: 'pipe' }); } catch {}
+    return null;
+  }
+  
+  // Cleanup repo
+  try { execSync(`rm -rf "${tmpDir}"`, { stdio: 'pipe' }); } catch {}
+  
+  if (!report) {
+    console.log(`  ${c.red}Could not parse LLM response as JSON${c.reset}`);
+    return null;
+  }
+  
+  // Display results
+  console.log();
+  const riskScore = report.risk_score || 0;
+  console.log(`  ${riskBadge(riskScore)} Risk ${riskScore}/100  ${c.bold}${report.result || 'unknown'}${c.reset}`);
+  console.log();
+  
+  if (report.findings && report.findings.length > 0) {
+    console.log(`  ${c.bold}Findings (${report.findings.length})${c.reset}`);
+    console.log();
+    for (const f of report.findings) {
+      const sc = severityColor(f.severity);
+      console.log(`  ${severityIcon(f.severity)} ${sc}${(f.severity || '').toUpperCase().padEnd(8)}${c.reset} ${f.title}`);
+      if (f.file) console.log(`    ${c.dim}${f.file}${f.line ? ':' + f.line : ''}${c.reset}`);
+      if (f.description) console.log(`    ${c.dim}${f.description.slice(0, 120)}${c.reset}`);
+      console.log();
+    }
+  } else {
+    console.log(`  ${c.green}No findings — package looks clean.${c.reset}`);
+    console.log();
+  }
+  
+  // Upload to registry
+  const creds = loadCredentials();
+  if (creds) {
+    process.stdout.write(`  Uploading report to registry...`);
+    try {
+      const res = await fetch(`${REGISTRY_URL}/api/reports`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${creds.api_key}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(report),
+        signal: AbortSignal.timeout(15_000),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        console.log(` ${c.green}done${c.reset}`);
+        console.log(`  ${c.dim}Report: ${REGISTRY_URL}/skills/${slug}${c.reset}`);
+      } else {
+        console.log(` ${c.yellow}failed (HTTP ${res.status})${c.reset}`);
+      }
+    } catch (err) {
+      console.log(` ${c.yellow}failed${c.reset}`);
+    }
+  } else {
+    console.log(`  ${c.dim}Run ${c.cyan}agentaudit setup${c.dim} to upload reports to the registry${c.reset}`);
+  }
+  
+  console.log();
+  return report;
+}
+
 // ── Check command ───────────────────────────────────────
 
 async function checkPackage(name) {
@@ -815,7 +1045,7 @@ async function checkPackage(name) {
   const data = await checkRegistry(name);
   if (!data) {
     console.log(`  ${c.yellow}Not found${c.reset} — package "${name}" hasn't been audited yet.`);
-    console.log(`  ${c.dim}Run: agentaudit scan <repo-url> to audit it${c.reset}`);
+    console.log(`  ${c.dim}Run: agentaudit audit <repo-url> for a deep LLM audit${c.reset}`);
     return;
   }
   
@@ -835,17 +1065,22 @@ async function main() {
   
   if (args.length === 0 || args[0] === '--help' || args[0] === '-h') {
     banner();
-    console.log(`  ${c.bold}Usage:${c.reset}`);
-    console.log(`    agentaudit setup                            Register + configure API key`);
-    console.log(`    agentaudit discover                         Find & check local MCP servers`);
-    console.log(`    agentaudit scan <repo-url> [repo-url...]    Scan repositories`);
-    console.log(`    agentaudit check <package-name>             Look up in registry`);
+    console.log(`  ${c.bold}Commands:${c.reset}`);
+    console.log();
+    console.log(`    ${c.cyan}agentaudit discover${c.reset}                         Find local MCP servers + check registry`);
+    console.log(`    ${c.cyan}agentaudit scan${c.reset} <url> [url...]               Quick static scan (regex, local)`);
+    console.log(`    ${c.cyan}agentaudit audit${c.reset} <url> [url...]              Deep LLM-powered security audit`);
+    console.log(`    ${c.cyan}agentaudit check${c.reset} <name>                      Look up package in registry`);
+    console.log(`    ${c.cyan}agentaudit setup${c.reset}                             Register + configure API key`);
+    console.log();
+    console.log(`  ${c.bold}scan${c.reset} vs ${c.bold}audit${c.reset}:`);
+    console.log(`    ${c.dim}scan  = fast regex-based static analysis (~2s)${c.reset}`);
+    console.log(`    ${c.dim}audit = deep LLM analysis with 3-pass methodology (~30s)${c.reset}`);
     console.log();
     console.log(`  ${c.bold}Examples:${c.reset}`);
-    console.log(`    agentaudit setup`);
     console.log(`    agentaudit discover`);
     console.log(`    agentaudit scan https://github.com/owner/repo`);
-    console.log(`    agentaudit scan repo1.git repo2.git repo3.git`);
+    console.log(`    agentaudit audit https://github.com/owner/repo`);
     console.log(`    agentaudit check fastmcp`);
     console.log();
     process.exit(0);
@@ -879,6 +1114,7 @@ async function main() {
     if (targets.length === 0) {
       console.log(`  ${c.red}Error: at least one repository URL required${c.reset}`);
       console.log(`  ${c.dim}Tip: use ${c.cyan}agentaudit discover${c.dim} to find & check locally installed MCP servers${c.reset}`);
+      console.log(`  ${c.dim}Tip: use ${c.cyan}agentaudit audit <url>${c.dim} for a deep LLM-powered audit${c.reset}`);
       process.exit(1);
     }
     
@@ -890,6 +1126,19 @@ async function main() {
     
     if (results.length > 1) {
       printSummary(results);
+    }
+    return;
+  }
+  
+  if (command === 'audit') {
+    const urls = targets.filter(t => !t.startsWith('--'));
+    if (urls.length === 0) {
+      console.log(`  ${c.red}Error: at least one repository URL required${c.reset}`);
+      process.exit(1);
+    }
+    
+    for (const url of urls) {
+      await auditRepo(url);
     }
     return;
   }

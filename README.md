@@ -169,22 +169,41 @@ The MCP server finds credentials automatically from:
 ## CLI Reference
 
 ```
-agentaudit setup                            Register + configure API key
-agentaudit scan <url> [url...]              Scan Git repositories
+agentaudit discover                         Find local MCP servers + check registry
+agentaudit scan <url> [url...]              Quick static scan (regex, ~2s)
+agentaudit audit <url> [url...]             Deep LLM-powered audit (~30s)
 agentaudit check <name>                     Look up package in registry
-agentaudit --help                           Show help
+agentaudit setup                            Register + configure API key
 ```
+
+### `scan` vs `audit`
+
+| | `scan` | `audit` |
+|--|--------|---------|
+| **How** | Regex-based static analysis | LLM 3-pass analysis (UNDERSTAND → DETECT → CLASSIFY) |
+| **Speed** | ~2 seconds | ~30 seconds |
+| **Depth** | Pattern matching | Semantic code understanding |
+| **Needs API key** | No | Yes (`ANTHROPIC_API_KEY` or `OPENAI_API_KEY`) |
+| **Upload to registry** | No | Yes (with `agentaudit setup`) |
+
+Use `scan` for quick checks, `audit` for thorough analysis.
 
 ### Examples
 
 ```bash
-# Scan a single repo
+# Discover all MCP servers on your machine
+agentaudit discover
+
+# Quick scan
 agentaudit scan https://github.com/jlowin/fastmcp
 
-# Scan multiple repos at once
-agentaudit scan https://github.com/owner/repo1 https://github.com/owner/repo2
+# Deep audit (requires ANTHROPIC_API_KEY or OPENAI_API_KEY)
+agentaudit audit https://github.com/jlowin/fastmcp
 
-# Check registry for existing audit
+# Export audit for manual LLM review (no API key needed)
+agentaudit audit https://github.com/owner/repo --export
+
+# Check registry
 agentaudit check mongodb-mcp-server
 ```
 
