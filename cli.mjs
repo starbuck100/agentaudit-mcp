@@ -1491,14 +1491,9 @@ async function checkPackage(name) {
 async function main() {
   const rawArgs = process.argv.slice(2);
   
-  // If stdin is not a TTY and no args → we're being launched as MCP server by an editor
-  // Delegate to the MCP server (index.mjs) instead of running the CLI
-  if (!process.stdin.isTTY && rawArgs.length === 0) {
-    const { fileURLToPath: fu } = await import('url');
-    const mcpPath = path.join(path.dirname(fu(import.meta.url)), 'index.mjs');
-    const { fork } = await import('child_process');
-    const child = fork(mcpPath, [], { stdio: 'inherit' });
-    child.on('exit', (code) => { process.exitCode = code || 0; });
+  // MCP server mode: launched by an editor (no TTY + no args) or explicit --stdio flag
+  if (rawArgs.includes('--stdio') || (!process.stdin.isTTY && rawArgs.length === 0)) {
+    await import('./index.mjs');
     return;
   }
   

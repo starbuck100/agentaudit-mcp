@@ -100,7 +100,7 @@ Add AgentAudit as an MCP server — your AI agent can then discover, scan, and a
   "mcpServers": {
     "agentaudit": {
       "command": "npx",
-      "args": ["-y", "agentaudit"]
+      "args": ["-y", "agentaudit", "--stdio"]
     }
   }
 }
@@ -115,7 +115,7 @@ Add AgentAudit as an MCP server — your AI agent can then discover, scan, and a
   "mcpServers": {
     "agentaudit": {
       "command": "npx",
-      "args": ["-y", "agentaudit"]
+      "args": ["-y", "agentaudit", "--stdio"]
     }
   }
 }
@@ -130,7 +130,7 @@ Add AgentAudit as an MCP server — your AI agent can then discover, scan, and a
   "mcpServers": {
     "agentaudit": {
       "command": "npx",
-      "args": ["-y", "agentaudit"]
+      "args": ["-y", "agentaudit", "--stdio"]
     }
   }
 }
@@ -145,7 +145,7 @@ Add AgentAudit as an MCP server — your AI agent can then discover, scan, and a
   "servers": {
     "agentaudit": {
       "command": "npx",
-      "args": ["-y", "agentaudit"]
+      "args": ["-y", "agentaudit", "--stdio"]
     }
   }
 }
@@ -162,7 +162,7 @@ Add to the `mcpServers` section of your existing config:
     {
       "name": "agentaudit",
       "command": "npx",
-      "args": ["-y", "agentaudit"]
+      "args": ["-y", "agentaudit", "--stdio"]
     }
   ]
 }
@@ -178,7 +178,7 @@ Add to the `mcpServers` section of your existing config:
     "agentaudit": {
       "command": {
         "path": "npx",
-        "args": ["-y", "agentaudit"]
+        "args": ["-y", "agentaudit", "--stdio"]
       }
     }
   }
