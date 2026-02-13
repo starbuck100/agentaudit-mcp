@@ -602,6 +602,210 @@ async function scanRepo(url) {
   return { slug, url, info, files: files.length, findings, registryData, duration };
 }
 
+// ── Discover local MCP configs ──────────────────────────
+
+function findMcpConfigs() {
+  const home = process.env.HOME || process.env.USERPROFILE || '';
+  const platform = process.platform;
+  
+  // All known MCP config locations
+  const candidates = [
+    // Claude Desktop
+    { name: 'Claude Desktop', path: path.join(home, '.claude', 'mcp.json') },
+    { name: 'Claude Desktop', path: path.join(home, 'Library', 'Application Support', 'Claude', 'claude_desktop_config.json') },
+    { name: 'Claude Desktop', path: path.join(home, 'AppData', 'Roaming', 'Claude', 'claude_desktop_config.json') },
+    { name: 'Claude Desktop', path: path.join(home, '.config', 'claude', 'claude_desktop_config.json') },
+    // Cursor
+    { name: 'Cursor', path: path.join(home, '.cursor', 'mcp.json') },
+    // Windsurf / Codeium
+    { name: 'Windsurf', path: path.join(home, '.codeium', 'windsurf', 'mcp_config.json') },
+    // VS Code
+    { name: 'VS Code', path: path.join(home, '.vscode', 'mcp.json') },
+    // Continue.dev
+    { name: 'Continue', path: path.join(home, '.continue', 'config.json') },
+  ];
+  
+  // Also scan workspace .cursor/mcp.json, .vscode/mcp.json in cwd
+  const cwd = process.cwd();
+  candidates.push(
+    { name: 'Cursor (project)', path: path.join(cwd, '.cursor', 'mcp.json') },
+    { name: 'VS Code (project)', path: path.join(cwd, '.vscode', 'mcp.json') },
+  );
+  
+  const found = [];
+  for (const c of candidates) {
+    if (fs.existsSync(c.path)) {
+      try {
+        const content = JSON.parse(fs.readFileSync(c.path, 'utf8'));
+        found.push({ ...c, content });
+      } catch {}
+    }
+  }
+  return found;
+}
+
+function extractServersFromConfig(config) {
+  // Handle both { mcpServers: {...} } and { servers: {...} } formats
+  const servers = config.mcpServers || config.servers || {};
+  const result = [];
+  
+  for (const [name, serverConfig] of Object.entries(servers)) {
+    const info = {
+      name,
+      command: serverConfig.command || null,
+      args: serverConfig.args || [],
+      url: serverConfig.url || null,
+      sourceUrl: null,
+    };
+    
+    // Try to extract source URL from args (common patterns)
+    const allArgs = [info.command, ...info.args].filter(Boolean).join(' ');
+    
+    // npx package-name → npm package
+    const npxMatch = allArgs.match(/npx\s+(?:-y\s+)?(@?[a-z0-9][\w./-]*)/i);
+    if (npxMatch) info.npmPackage = npxMatch[1];
+    
+    // node /path/to/something → try to find package.json
+    const nodePathMatch = allArgs.match(/node\s+["']?([^"'\s]+)/);
+    if (nodePathMatch) {
+      const scriptPath = nodePathMatch[1];
+      // Walk up to find package.json with repository
+      let dir = path.dirname(path.resolve(scriptPath));
+      for (let i = 0; i < 5; i++) {
+        const pkgPath = path.join(dir, 'package.json');
+        if (fs.existsSync(pkgPath)) {
+          try {
+            const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+            if (pkg.repository?.url) {
+              info.sourceUrl = pkg.repository.url.replace(/^git\+/, '').replace(/\.git$/, '');
+            }
+            if (pkg.name) info.npmPackage = pkg.name;
+          } catch {}
+          break;
+        }
+        const parent = path.dirname(dir);
+        if (parent === dir) break;
+        dir = parent;
+      }
+    }
+    
+    // python/uvx with package name
+    const pyMatch = allArgs.match(/(?:uvx|pip run|python -m)\s+(@?[a-z0-9][\w./-]*)/i);
+    if (pyMatch) info.pyPackage = pyMatch[1];
+    
+    result.push(info);
+  }
+  return result;
+}
+
+function serverSlug(server) {
+  // Try to derive a slug for registry lookup
+  if (server.npmPackage) return server.npmPackage.replace(/^@/, '').replace(/\//g, '-');
+  if (server.pyPackage) return server.pyPackage.replace(/[^a-z0-9-]/gi, '-');
+  return server.name.toLowerCase().replace(/[^a-z0-9-]/gi, '-');
+}
+
+async function discoverCommand() {
+  console.log(`  ${c.bold}Discovering local MCP servers...${c.reset}`);
+  console.log();
+  
+  const configs = findMcpConfigs();
+  
+  if (configs.length === 0) {
+    console.log(`  ${c.yellow}No MCP configurations found.${c.reset}`);
+    console.log(`  ${c.dim}Searched: Claude Desktop, Cursor, Windsurf, VS Code${c.reset}`);
+    console.log();
+    console.log(`  ${c.dim}MCP config locations:${c.reset}`);
+    console.log(`  ${c.dim}  Claude:   ~/.claude/mcp.json${c.reset}`);
+    console.log(`  ${c.dim}  Cursor:   ~/.cursor/mcp.json${c.reset}`);
+    console.log(`  ${c.dim}  Windsurf: ~/.codeium/windsurf/mcp_config.json${c.reset}`);
+    console.log(`  ${c.dim}  VS Code:  ~/.vscode/mcp.json${c.reset}`);
+    console.log();
+    return;
+  }
+  
+  let totalServers = 0;
+  let checkedServers = 0;
+  let auditedServers = 0;
+  let unauditedServers = 0;
+  
+  for (const config of configs) {
+    const servers = extractServersFromConfig(config.content);
+    const serverCount = servers.length;
+    totalServers += serverCount;
+    
+    const countLabel = serverCount === 0
+      ? `${c.dim}no servers${c.reset}`
+      : `found ${c.bold}${serverCount}${c.reset} server${serverCount > 1 ? 's' : ''}`;
+    
+    console.log(`${icons.bullet}  Scanning ${c.bold}${config.name}${c.reset}  ${c.dim}${config.path}${c.reset}    ${countLabel}`);
+    
+    if (serverCount === 0) {
+      console.log();
+      continue;
+    }
+    
+    console.log();
+    
+    for (let i = 0; i < servers.length; i++) {
+      const server = servers[i];
+      const isLast = i === servers.length - 1;
+      const branch = isLast ? icons.treeLast : icons.tree;
+      const pipe = isLast ? '   ' : `${icons.pipe}  `;
+      
+      const slug = serverSlug(server);
+      checkedServers++;
+      
+      // Registry lookup
+      const registryData = await checkRegistry(slug);
+      
+      // Also try with server name directly
+      let regData = registryData;
+      if (!regData && slug !== server.name.toLowerCase()) {
+        regData = await checkRegistry(server.name.toLowerCase());
+      }
+      
+      // Determine source display
+      let sourceLabel = '';
+      if (server.npmPackage) sourceLabel = `${c.dim}npm:${server.npmPackage}${c.reset}`;
+      else if (server.pyPackage) sourceLabel = `${c.dim}pip:${server.pyPackage}${c.reset}`;
+      else if (server.command) sourceLabel = `${c.dim}${[server.command, ...server.args.slice(0, 2)].join(' ')}${c.reset}`;
+      
+      if (regData) {
+        auditedServers++;
+        const riskScore = regData.risk_score ?? regData.latest_risk_score ?? 0;
+        const hasOfficial = regData.has_official_audit;
+        console.log(`${branch}  ${c.bold}${server.name}${c.reset}    ${sourceLabel}`);
+        console.log(`${pipe}  ${riskBadge(riskScore)} Risk ${riskScore}  ${hasOfficial ? `${c.green}✔ official${c.reset}  ` : ''}${c.dim}${REGISTRY_URL}/skills/${slug}${c.reset}`);
+      } else {
+        unauditedServers++;
+        console.log(`${branch}  ${c.bold}${server.name}${c.reset}    ${sourceLabel}`);
+        console.log(`${pipe}  ${c.yellow}⚠ not audited${c.reset}  ${c.dim}Run: agentaudit scan <source-url>${c.reset}`);
+      }
+      
+      if (server.sourceUrl) {
+        console.log(`${pipe}  ${c.dim}source: ${server.sourceUrl}${c.reset}`);
+      }
+    }
+    
+    console.log();
+  }
+  
+  // Summary
+  console.log(`${c.dim}${'─'.repeat(60)}${c.reset}`);
+  console.log(`  ${c.bold}Summary${c.reset}  ${totalServers} server${totalServers !== 1 ? 's' : ''} across ${configs.length} config${configs.length !== 1 ? 's' : ''}`);
+  console.log();
+  if (auditedServers > 0) console.log(`  ${icons.safe}  ${c.green}${auditedServers} audited${c.reset}`);
+  if (unauditedServers > 0) console.log(`  ${icons.caution}  ${c.yellow}${unauditedServers} not audited${c.reset}`);
+  console.log();
+  
+  if (unauditedServers > 0) {
+    console.log(`  ${c.dim}To audit unaudited servers, run:${c.reset}`);
+    console.log(`  ${c.cyan}agentaudit scan <github-url>${c.reset}`);
+    console.log();
+  }
+}
+
 // ── Check command ───────────────────────────────────────
 
 async function checkPackage(name) {
@@ -633,11 +837,13 @@ async function main() {
     banner();
     console.log(`  ${c.bold}Usage:${c.reset}`);
     console.log(`    agentaudit setup                            Register + configure API key`);
+    console.log(`    agentaudit discover                         Find & check local MCP servers`);
     console.log(`    agentaudit scan <repo-url> [repo-url...]    Scan repositories`);
     console.log(`    agentaudit check <package-name>             Look up in registry`);
     console.log();
     console.log(`  ${c.bold}Examples:${c.reset}`);
     console.log(`    agentaudit setup`);
+    console.log(`    agentaudit discover`);
     console.log(`    agentaudit scan https://github.com/owner/repo`);
     console.log(`    agentaudit scan repo1.git repo2.git repo3.git`);
     console.log(`    agentaudit check fastmcp`);
@@ -655,6 +861,11 @@ async function main() {
     return;
   }
   
+  if (command === 'discover') {
+    await discoverCommand();
+    return;
+  }
+  
   if (command === 'check') {
     if (targets.length === 0) {
       console.log(`  ${c.red}Error: package name required${c.reset}`);
@@ -667,6 +878,7 @@ async function main() {
   if (command === 'scan') {
     if (targets.length === 0) {
       console.log(`  ${c.red}Error: at least one repository URL required${c.reset}`);
+      console.log(`  ${c.dim}Tip: use ${c.cyan}agentaudit discover${c.dim} to find & check locally installed MCP servers${c.reset}`);
       process.exit(1);
     }
     
