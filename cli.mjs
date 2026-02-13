@@ -638,6 +638,11 @@ function findMcpConfigs() {
     { name: 'Continue', path: path.join(home, '.continue', 'config.json') },
   ];
   
+  // Also check AGENTAUDIT_TEST_CONFIG env for testing
+  if (process.env.AGENTAUDIT_TEST_CONFIG) {
+    candidates.push({ name: 'Test Config', path: process.env.AGENTAUDIT_TEST_CONFIG });
+  }
+  
   // Also scan workspace .cursor/mcp.json, .vscode/mcp.json in cwd
   const cwd = process.cwd();
   candidates.push(
@@ -731,6 +736,22 @@ function serverSlug(server) {
   return server.name.toLowerCase().replace(/[^a-z0-9-]/gi, '-');
 }
 
+async function searchGitHub(query) {
+  try {
+    const res = await fetch(`https://api.github.com/search/repositories?q=${encodeURIComponent(query)}&per_page=1`, {
+      signal: AbortSignal.timeout(5000),
+      headers: { 'Accept': 'application/vnd.github+json' },
+    });
+    if (res.ok) {
+      const data = await res.json();
+      if (data.items?.length > 0) {
+        return data.items[0].html_url;
+      }
+    }
+  } catch {}
+  return null;
+}
+
 async function resolveSourceUrl(server) {
   // Already have it
   if (server.sourceUrl) return server.sourceUrl;
@@ -750,7 +771,9 @@ async function resolveSourceUrl(server) {
         }
       }
     } catch {}
-    // Fallback: npm page
+    // Fallback: try GitHub search for the package name
+    const ghUrl = await searchGitHub(server.npmPackage);
+    if (ghUrl) return ghUrl;
     return `https://www.npmjs.com/package/${server.npmPackage}`;
   }
   
@@ -767,6 +790,9 @@ async function resolveSourceUrl(server) {
         if (source && source.startsWith('http')) return source;
       }
     } catch {}
+    // Fallback: GitHub search
+    const ghUrl = await searchGitHub(server.pyPackage);
+    if (ghUrl) return ghUrl;
     return `https://pypi.org/project/${server.pyPackage}/`;
   }
   
@@ -915,16 +941,28 @@ async function discoverCommand(options = {}) {
   if (unauditedServers > 0) console.log(`  ${icons.caution}  ${c.yellow}${unauditedServers} not audited${c.reset}`);
   console.log();
   
-  // --scan: automatically scan all servers with resolved source URLs
+  // --scan: automatically scan all servers with resolved source URLs (git-cloneable only)
   if (autoScan) {
-    const scanTargets = allServersWithUrls.filter(s => s.sourceUrl && s.sourceUrl.startsWith('http'));
-    if (scanTargets.length > 0) {
+    const isCloneable = (url) => /^https?:\/\/(github\.com|gitlab\.com|bitbucket\.org)\//i.test(url);
+    const scanTargets = allServersWithUrls.filter(s => s.sourceUrl && isCloneable(s.sourceUrl));
+    // Deduplicate by sourceUrl
+    const seen = new Set();
+    const dedupedTargets = scanTargets.filter(s => {
+      if (seen.has(s.sourceUrl)) return false;
+      seen.add(s.sourceUrl);
+      return true;
+    });
+    const skipped = allServersWithUrls.filter(s => s.sourceUrl && !isCloneable(s.sourceUrl));
+    if (dedupedTargets.length > 0) {
       console.log(`${c.dim}${'─'.repeat(60)}${c.reset}`);
-      console.log(`  ${c.bold}${icons.scan}  Auto-scanning ${scanTargets.length} server${scanTargets.length !== 1 ? 's' : ''}...${c.reset}`);
+      console.log(`  ${c.bold}${icons.scan}  Auto-scanning ${dedupedTargets.length} server${dedupedTargets.length !== 1 ? 's' : ''}...${c.reset}`);
+      if (skipped.length > 0) {
+        console.log(`  ${c.dim}(${skipped.length} skipped — no cloneable source URL)${c.reset}`);
+      }
       console.log();
       
       const scanResults = [];
-      for (const target of scanTargets) {
+      for (const target of dedupedTargets) {
         const result = await scanRepo(target.sourceUrl);
         if (result) scanResults.push({ ...result, serverName: target.name });
       }
