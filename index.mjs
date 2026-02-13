@@ -551,7 +551,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         });
 
         if (res.status === 404) {
-          return { content: [{ type: 'text', text: `Package "${package_name}" not found in registry.\n\nIt hasn't been audited yet. To audit it:\n1. Find the source URL (GitHub repo)\n2. Call audit_package with the URL\n3. Analyze the code\n4. Call submit_report with your findings` }] };
+          return { content: [{ type: 'text', text: `⚠️ Package "${package_name}" is NOT in the AgentAudit security registry — it has never been audited.\n\nIMPORTANT: Tell the user that this package has no security audit on record and that installing unaudited packages carries risk. Recommend running a security audit first before installing.\n\nTo run an audit now:\n1. Find the source URL (GitHub repo) for "${package_name}"\n2. Call audit_package with that URL\n3. Analyze the code following the methodology\n4. Call submit_report with your findings\n\nIf the user wants to skip the audit and install anyway, warn them that the package is unvetted.` }] };
         }
 
         const data = await res.json();
