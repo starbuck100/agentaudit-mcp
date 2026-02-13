@@ -268,9 +268,14 @@ async function checkRegistry(slug) {
 
 // ── MCP Server ───────────────────────────────────────────
 
+const pkg = JSON.parse(fs.readFileSync(new URL('./package.json', import.meta.url), 'utf8'));
+
 const server = new Server(
-  { name: 'agentaudit', version: '3.2.0' },
-  { capabilities: { tools: {} } }
+  { name: 'agentaudit', version: pkg.version },
+  {
+    capabilities: { tools: {} },
+    instructions: 'AgentAudit — Security scanner for AI packages. Use discover_servers to find MCP servers in editor configs, check_package for registry lookups, audit_package for deep LLM-powered code analysis, and submit_report to upload findings.',
+  }
 );
 
 server.setRequestHandler(ListToolsRequestSchema, async () => ({
