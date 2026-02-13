@@ -268,21 +268,16 @@ async function checkRegistry(slug) {
 
 // ── MCP Server ───────────────────────────────────────────
 
-const pkg = JSON.parse(fs.readFileSync(new URL('./package.json', import.meta.url), 'utf8'));
-
 const server = new Server(
-  { name: 'agentaudit', version: pkg.version },
-  {
-    capabilities: { tools: {} },
-    instructions: 'AgentAudit — Security scanner for AI packages. Use discover_servers to find MCP servers in editor configs, check_package for registry lookups, audit_package for deep LLM-powered code analysis, and submit_report to upload findings.',
-  }
+  { name: 'agentaudit', version: '3.2.0' },
+  { capabilities: { tools: {} } }
 );
 
 server.setRequestHandler(ListToolsRequestSchema, async () => ({
   tools: [
     {
       name: 'discover_servers',
-      description: 'Find all locally installed MCP servers by scanning config files (Claude Desktop, Cursor, Windsurf, VS Code). Returns the list of configured servers with their names, commands, and package sources. Use this to see what MCP servers are installed, then check each against the registry with check_package, or audit them with audit_package.',
+      description: 'Scan local config files to list ALREADY INSTALLED MCP servers (Claude Desktop, Cursor, Windsurf, VS Code). Use ONLY when the user wants to review/list their existing servers. Do NOT use this when the user wants to install, evaluate, or look up a specific package — use check_package for that instead.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -295,7 +290,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
     },
     {
       name: 'audit_package',
-      description: 'Deep security audit: clone a repository and prepare it for LLM-powered analysis. Returns the source code and a 3-pass audit methodology (UNDERSTAND → DETECT → CLASSIFY). You (the agent) then analyze the code following the instructions and call submit_report with your findings. This is a DEEP audit — use check_package first for a quick registry lookup.',
+      description: 'Deep security audit of a Git repository. Clones the repo and returns source code with a 3-pass audit methodology (UNDERSTAND → DETECT → CLASSIFY). You then analyze the code and call submit_report with findings. Use check_package FIRST to see if an audit already exists — only use this for unaudited packages or when a fresh audit is requested.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -323,7 +318,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
     },
     {
       name: 'check_package',
-      description: 'Quick registry lookup: check if a package has already been audited on agentaudit.dev. Returns the latest audit results (risk score, findings, official status) if available. Use this before audit_package to avoid duplicate work.',
+      description: 'Look up a package in the AgentAudit security registry. USE THIS FIRST whenever the user wants to install, add, evaluate, or learn about a specific MCP server or package. Returns risk score, findings, and official audit status if available. If the package is not yet in the registry, suggests running an audit. This is the go-to tool for any "is this safe?" or "should I install this?" question.',
       inputSchema: {
         type: 'object',
         properties: {
