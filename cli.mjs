@@ -93,6 +93,111 @@ function askQuestion(question) {
   return new Promise(resolve => rl.question(question, answer => { rl.close(); resolve(answer.trim()); }));
 }
 
+/**
+ * Interactive multi-select in terminal. No dependencies.
+ * items: [{ label, sublabel?, value, checked? }]
+ * Returns: array of selected values
+ */
+function multiSelect(items, { title = 'Select items', hint = 'Space=toggle  ↑↓=move  a=all  n=none  Enter=confirm' } = {}) {
+  return new Promise((resolve) => {
+    if (!process.stdin.isTTY) {
+      // Non-interactive: return all items
+      resolve(items.map(i => i.value));
+      return;
+    }
+    
+    const selected = new Set(items.filter(i => i.checked).map((_, idx) => idx));
+    let cursor = 0;
+    
+    const render = () => {
+      // Move cursor up to overwrite previous render
+      process.stdout.write(`\x1b[${items.length + 3}A\x1b[J`);
+      draw();
+    };
+    
+    const draw = () => {
+      console.log(`  ${c.bold}${title}${c.reset}  ${c.dim}(${selected.size}/${items.length} selected)${c.reset}`);
+      console.log(`  ${c.dim}${hint}${c.reset}`);
+      console.log();
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        const isCursor = i === cursor;
+        const isSelected = selected.has(i);
+        const pointer = isCursor ? `${c.cyan}❯${c.reset}` : ' ';
+        const checkbox = isSelected ? `${c.green}◉${c.reset}` : `${c.dim}○${c.reset}`;
+        const label = isCursor ? `${c.bold}${item.label}${c.reset}` : item.label;
+        const sub = item.sublabel ? `  ${c.dim}${item.sublabel}${c.reset}` : '';
+        console.log(` ${pointer} ${checkbox}  ${label}${sub}`);
+      }
+    };
+    
+    // Initial draw
+    draw();
+    
+    process.stdin.setRawMode(true);
+    process.stdin.resume();
+    process.stdin.setEncoding('utf8');
+    
+    const onData = (key) => {
+      // Ctrl+C
+      if (key === '\x03') {
+        process.stdin.setRawMode(false);
+        process.stdin.pause();
+        process.stdin.removeListener('data', onData);
+        console.log();
+        process.exit(0);
+      }
+      
+      // Enter
+      if (key === '\r' || key === '\n') {
+        process.stdin.setRawMode(false);
+        process.stdin.pause();
+        process.stdin.removeListener('data', onData);
+        resolve(items.filter((_, i) => selected.has(i)).map(i => i.value));
+        return;
+      }
+      
+      // Space — toggle
+      if (key === ' ') {
+        if (selected.has(cursor)) selected.delete(cursor);
+        else selected.add(cursor);
+        render();
+        return;
+      }
+      
+      // a — select all
+      if (key === 'a') {
+        for (let i = 0; i < items.length; i++) selected.add(i);
+        render();
+        return;
+      }
+      
+      // n — select none
+      if (key === 'n') {
+        selected.clear();
+        render();
+        return;
+      }
+      
+      // Arrow up / k
+      if (key === '\x1b[A' || key === 'k') {
+        cursor = (cursor - 1 + items.length) % items.length;
+        render();
+        return;
+      }
+      
+      // Arrow down / j
+      if (key === '\x1b[B' || key === 'j') {
+        cursor = (cursor + 1) % items.length;
+        render();
+        return;
+      }
+    };
+    
+    process.stdin.on('data', onData);
+  });
+}
+
 async function registerAgent(agentName) {
   const res = await fetch(`${REGISTRY_URL}/api/register`, {
     method: 'POST',
@@ -834,6 +939,7 @@ async function resolveSourceUrl(server) {
 
 async function discoverCommand(options = {}) {
   const autoScan = options.scan || false;
+  const interactiveAudit = options.audit || false;
   
   console.log(`  ${c.bold}Discovering local MCP servers...${c.reset}`);
   console.log();
@@ -1001,6 +1107,45 @@ async function discoverCommand(options = {}) {
       console.log(`  ${c.dim}No scannable source URLs found.${c.reset}`);
       console.log();
     }
+  } else if (interactiveAudit && allServersWithUrls.length > 0) {
+    // Interactive multi-select for audit
+    const isCloneable = (url) => /^https?:\/\/(github\.com|gitlab\.com|bitbucket\.org)\//i.test(url);
+    const auditCandidates = [];
+    const seen = new Set();
+    for (const s of allServersWithUrls) {
+      if (!s.sourceUrl || !isCloneable(s.sourceUrl)) continue;
+      if (seen.has(s.sourceUrl)) continue;
+      seen.add(s.sourceUrl);
+      auditCandidates.push(s);
+    }
+    
+    if (auditCandidates.length > 0) {
+      console.log();
+      const items = auditCandidates.map(s => ({
+        label: s.name,
+        sublabel: s.hasAudit ? `${c.green}✔ audited${c.reset}  ${s.sourceUrl}` : s.sourceUrl,
+        value: s,
+        checked: !s.hasAudit, // Pre-select unaudited
+      }));
+      
+      const selected = await multiSelect(items, {
+        title: 'Select servers to audit',
+        hint: 'Space=toggle  ↑↓=move  a=all  n=none  Enter=confirm',
+      });
+      
+      if (selected.length > 0) {
+        console.log();
+        console.log(`  ${c.bold}Auditing ${selected.length} server${selected.length !== 1 ? 's' : ''}...${c.reset}`);
+        console.log();
+        for (const s of selected) {
+          await auditRepo(s.sourceUrl);
+          console.log();
+        }
+      } else {
+        console.log();
+        console.log(`  ${c.dim}No servers selected.${c.reset}`);
+      }
+    }
   } else if (unauditedServers > 0) {
     if (unauditedWithUrls.length > 0) {
       console.log(`  ${c.dim}To audit unaudited servers:${c.reset}`);
@@ -1012,7 +1157,8 @@ async function discoverCommand(options = {}) {
       console.log(`  ${c.cyan}agentaudit audit <source-url>${c.reset}`);
     }
     console.log();
-    console.log(`  ${c.dim}Or run ${c.cyan}agentaudit discover --scan${c.dim} to auto-scan all servers${c.reset}`);
+    console.log(`  ${c.dim}Or run ${c.cyan}agentaudit discover --scan${c.dim} to quick-scan all servers${c.reset}`);
+    console.log(`  ${c.dim}Or run ${c.cyan}agentaudit discover --audit${c.dim} to select & deep-audit interactively${c.reset}`);
     console.log();
   }
 }
@@ -1305,6 +1451,7 @@ async function main() {
     console.log();
     console.log(`    ${c.cyan}agentaudit discover${c.reset}                         Find local MCP servers + check registry`);
     console.log(`    ${c.cyan}agentaudit discover --scan${c.reset}                  Discover + auto-scan all servers`);
+    console.log(`    ${c.cyan}agentaudit discover --audit${c.reset}                 Discover + select servers to deep-audit`);
     console.log(`    ${c.cyan}agentaudit scan${c.reset} <url> [url...]               Quick static scan (regex, local)`);
     console.log(`    ${c.cyan}agentaudit audit${c.reset} <url> [url...]              Deep LLM-powered security audit`);
     console.log(`    ${c.cyan}agentaudit check${c.reset} <name>                      Look up package in registry`);
@@ -1349,7 +1496,8 @@ async function main() {
   
   if (command === 'discover') {
     const scanFlag = targets.includes('--scan') || targets.includes('-s');
-    await discoverCommand({ scan: scanFlag });
+    const auditFlag = targets.includes('--audit') || targets.includes('-a');
+    await discoverCommand({ scan: scanFlag, audit: auditFlag });
     return;
   }
   
