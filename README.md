@@ -46,6 +46,10 @@ It checks packages against the [AgentAudit Trust Registry](https://agentaudit.de
 
 ## 🚀 Quick Start
 
+<p align="center">
+<img src="docs/cli-screenshot.png" alt="AgentAudit CLI — discover and scan" width="700">
+</p>
+
 ### Option A: CLI (recommended)
 
 ```bash
@@ -84,11 +88,12 @@ agentaudit lookup fastmcp
   Looking for general package scanning? Try `pip audit` or `npm audit`.
 ```
 
-### Option B: MCP Server in your editor
+### Option B: MCP Server in your AI editor
 
-Add to your MCP config:
+Add AgentAudit as an MCP server — your AI agent can then discover, scan, and audit packages using its own LLM. **No extra API key needed.**
 
-**Claude Desktop** (`~/.claude/mcp.json`), **Cursor** (`.cursor/mcp.json`), **Windsurf** (`~/.codeium/windsurf/mcp_config.json`):
+<details>
+<summary><strong>Claude Desktop</strong> — <code>~/.claude/mcp.json</code></summary>
 
 ```json
 {
@@ -100,8 +105,40 @@ Add to your MCP config:
   }
 }
 ```
+</details>
 
-**VS Code** (`.vscode/mcp.json`):
+<details>
+<summary><strong>Cursor</strong> — <code>.cursor/mcp.json</code> (project) or <code>~/.cursor/mcp.json</code> (global)</summary>
+
+```json
+{
+  "mcpServers": {
+    "agentaudit": {
+      "command": "npx",
+      "args": ["-y", "agentaudit"]
+    }
+  }
+}
+```
+</details>
+
+<details>
+<summary><strong>Windsurf</strong> — <code>~/.codeium/windsurf/mcp_config.json</code></summary>
+
+```json
+{
+  "mcpServers": {
+    "agentaudit": {
+      "command": "npx",
+      "args": ["-y", "agentaudit"]
+    }
+  }
+}
+```
+</details>
+
+<details>
+<summary><strong>VS Code</strong> — <code>.vscode/mcp.json</code></summary>
 
 ```json
 {
@@ -113,8 +150,43 @@ Add to your MCP config:
   }
 }
 ```
+</details>
 
-Your AI agent can then use AgentAudit's tools to scan packages directly within your editor.
+<details>
+<summary><strong>Continue.dev</strong> — <code>~/.continue/config.json</code></summary>
+
+Add to the `mcpServers` section of your existing config:
+```json
+{
+  "mcpServers": [
+    {
+      "name": "agentaudit",
+      "command": "npx",
+      "args": ["-y", "agentaudit"]
+    }
+  ]
+}
+```
+</details>
+
+<details>
+<summary><strong>Zed</strong> — <code>~/.config/zed/settings.json</code></summary>
+
+```json
+{
+  "context_servers": {
+    "agentaudit": {
+      "command": {
+        "path": "npx",
+        "args": ["-y", "agentaudit"]
+      }
+    }
+  }
+}
+```
+</details>
+
+Then ask your agent: *"Check which MCP servers I have installed and audit any unaudited ones."*
 
 ---
 
