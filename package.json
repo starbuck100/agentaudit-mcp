@@ -10,15 +10,13 @@
   "files": [
     "index.mjs",
     "cli.mjs",
-    "postinstall.mjs",
     "prompts/audit-prompt.md",
     "LICENSE",
     "README.md"
   ],
   "scripts": {
     "start": "node index.mjs",
-    "scan": "node cli.mjs scan",
-    "postinstall": "node postinstall.mjs"
+    "scan": "node cli.mjs scan"
   },
   "keywords": [
     "security",

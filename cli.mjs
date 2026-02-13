@@ -1221,6 +1221,17 @@ async function main() {
     console.log(`    agentaudit audit https://github.com/owner/repo`);
     console.log(`    agentaudit check fastmcp`);
     console.log();
+    console.log(`  ${c.bold}For deep audits,${c.reset} set an LLM API key:`);
+    if (process.platform === 'win32') {
+      console.log(`    ${c.dim}set ANTHROPIC_API_KEY=sk-ant-...${c.reset}    ${c.dim}(or OPENAI_API_KEY)${c.reset}`);
+    } else {
+      console.log(`    ${c.dim}export ANTHROPIC_API_KEY=sk-ant-...${c.reset}    ${c.dim}(or OPENAI_API_KEY)${c.reset}`);
+    }
+    console.log();
+    console.log(`  ${c.bold}Or use as MCP server${c.reset} in Cursor/Claude ${c.dim}(no extra API key needed):${c.reset}`);
+    console.log(`    ${c.dim}Add to your MCP config:${c.reset}`);
+    console.log(`    ${c.dim}{ "agentaudit": { "command": "npx", "args": ["-y", "agentaudit"] } }${c.reset}`);
+    console.log();
     process.exit(0);
   }
   
