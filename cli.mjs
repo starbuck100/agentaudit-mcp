@@ -806,7 +806,9 @@ async function resolveSourceUrl(server) {
   return null;
 }
 
-async function discoverCommand() {
+async function discoverCommand(options = {}) {
+  const autoScan = options.scan || false;
+  
   console.log(`  ${c.bold}Discovering local MCP servers...${c.reset}`);
   console.log();
   
@@ -830,6 +832,7 @@ async function discoverCommand() {
   let auditedServers = 0;
   let unauditedServers = 0;
   const unauditedWithUrls = [];
+  const allServersWithUrls = []; // For --scan: all servers we can scan
   
   for (const config of configs) {
     const servers = extractServersFromConfig(config.content);
@@ -874,20 +877,23 @@ async function discoverCommand() {
       else if (server.url) sourceLabel = `${c.dim}${server.url.length > 60 ? server.url.slice(0, 57) + '...' : server.url}${c.reset}`;
       else if (server.command) sourceLabel = `${c.dim}${[server.command, ...server.args.slice(0, 2)].join(' ')}${c.reset}`;
       
+      // Always resolve source URL (needed for --scan)
+      const resolvedUrl = await resolveSourceUrl(server);
+      
       if (regData) {
         auditedServers++;
         const riskScore = regData.risk_score ?? regData.latest_risk_score ?? 0;
         const hasOfficial = regData.has_official_audit;
         console.log(`${branch}  ${c.bold}${server.name}${c.reset}    ${sourceLabel}`);
         console.log(`${pipe}  ${riskBadge(riskScore)} Risk ${riskScore}  ${hasOfficial ? `${c.green}✔ official${c.reset}  ` : ''}${c.dim}${REGISTRY_URL}/skills/${slug}${c.reset}`);
+        if (resolvedUrl) allServersWithUrls.push({ name: server.name, sourceUrl: resolvedUrl, hasAudit: true, regData });
       } else {
         unauditedServers++;
-        // Resolve source URL
-        const resolvedUrl = await resolveSourceUrl(server);
         console.log(`${branch}  ${c.bold}${server.name}${c.reset}    ${sourceLabel}`);
         if (resolvedUrl) {
           console.log(`${pipe}  ${c.yellow}⚠ not audited${c.reset}  ${c.dim}Run: ${c.cyan}agentaudit audit ${resolvedUrl}${c.reset}`);
           unauditedWithUrls.push({ name: server.name, sourceUrl: resolvedUrl });
+          allServersWithUrls.push({ name: server.name, sourceUrl: resolvedUrl, hasAudit: false });
         } else {
           console.log(`${pipe}  ${c.yellow}⚠ not audited${c.reset}  ${c.dim}Source URL unknown — check the package's GitHub/npm page${c.reset}`);
         }
@@ -909,7 +915,55 @@ async function discoverCommand() {
   if (unauditedServers > 0) console.log(`  ${icons.caution}  ${c.yellow}${unauditedServers} not audited${c.reset}`);
   console.log();
   
-  if (unauditedServers > 0) {
+  // --scan: automatically scan all servers with resolved source URLs
+  if (autoScan) {
+    const scanTargets = allServersWithUrls.filter(s => s.sourceUrl && s.sourceUrl.startsWith('http'));
+    if (scanTargets.length > 0) {
+      console.log(`${c.dim}${'─'.repeat(60)}${c.reset}`);
+      console.log(`  ${c.bold}${icons.scan}  Auto-scanning ${scanTargets.length} server${scanTargets.length !== 1 ? 's' : ''}...${c.reset}`);
+      console.log();
+      
+      const scanResults = [];
+      for (const target of scanTargets) {
+        const result = await scanRepo(target.sourceUrl);
+        if (result) scanResults.push({ ...result, serverName: target.name });
+      }
+      
+      if (scanResults.length > 1) {
+        // Print combined scan summary
+        console.log(`${c.dim}${'─'.repeat(60)}${c.reset}`);
+        console.log(`  ${c.bold}Scan Summary${c.reset}  ${scanResults.length} server${scanResults.length !== 1 ? 's' : ''} scanned`);
+        console.log();
+        
+        let totalFindings = 0;
+        let serversWithFindings = 0;
+        
+        for (const r of scanResults) {
+          const findingCount = r.findings ? r.findings.length : 0;
+          totalFindings += findingCount;
+          if (findingCount > 0) serversWithFindings++;
+          
+          const status = findingCount === 0
+            ? `${icons.safe}  ${c.green}clean${c.reset}`
+            : `${icons.caution}  ${c.yellow}${findingCount} finding${findingCount !== 1 ? 's' : ''}${c.reset}`;
+          console.log(`  ${status}  ${c.bold}${r.serverName || r.slug}${c.reset}  ${c.dim}(${r.duration})${c.reset}`);
+        }
+        
+        console.log();
+        if (serversWithFindings > 0) {
+          console.log(`  ${c.yellow}${serversWithFindings}/${scanResults.length} server${scanResults.length !== 1 ? 's' : ''} with findings (${totalFindings} total)${c.reset}`);
+          console.log(`  ${c.dim}Run ${c.cyan}agentaudit audit <url>${c.dim} for deep LLM analysis on flagged servers${c.reset}`);
+        } else {
+          console.log(`  ${c.green}All servers passed quick scan${c.reset}`);
+          console.log(`  ${c.dim}Run ${c.cyan}agentaudit audit <url>${c.dim} for thorough LLM-powered analysis${c.reset}`);
+        }
+        console.log();
+      }
+    } else {
+      console.log(`  ${c.dim}No scannable source URLs found.${c.reset}`);
+      console.log();
+    }
+  } else if (unauditedServers > 0) {
     if (unauditedWithUrls.length > 0) {
       console.log(`  ${c.dim}To audit unaudited servers:${c.reset}`);
       for (const { name, sourceUrl } of unauditedWithUrls) {
@@ -919,6 +973,8 @@ async function discoverCommand() {
       console.log(`  ${c.dim}To audit unaudited servers, run:${c.reset}`);
       console.log(`  ${c.cyan}agentaudit audit <source-url>${c.reset}`);
     }
+    console.log();
+    console.log(`  ${c.dim}Or run ${c.cyan}agentaudit discover --scan${c.dim} to auto-scan all servers${c.reset}`);
     console.log();
   }
 }
@@ -1210,6 +1266,7 @@ async function main() {
     console.log(`  ${c.bold}Commands:${c.reset}`);
     console.log();
     console.log(`    ${c.cyan}agentaudit discover${c.reset}                         Find local MCP servers + check registry`);
+    console.log(`    ${c.cyan}agentaudit discover --scan${c.reset}                  Discover + auto-scan all servers`);
     console.log(`    ${c.cyan}agentaudit scan${c.reset} <url> [url...]               Quick static scan (regex, local)`);
     console.log(`    ${c.cyan}agentaudit audit${c.reset} <url> [url...]              Deep LLM-powered security audit`);
     console.log(`    ${c.cyan}agentaudit check${c.reset} <name>                      Look up package in registry`);
@@ -1221,6 +1278,7 @@ async function main() {
     console.log();
     console.log(`  ${c.bold}Examples:${c.reset}`);
     console.log(`    agentaudit discover`);
+    console.log(`    agentaudit discover --scan`);
     console.log(`    agentaudit scan https://github.com/owner/repo`);
     console.log(`    agentaudit audit https://github.com/owner/repo`);
     console.log(`    agentaudit check fastmcp`);
@@ -1252,7 +1310,8 @@ async function main() {
   }
   
   if (command === 'discover') {
-    await discoverCommand();
+    const scanFlag = targets.includes('--scan') || targets.includes('-s');
+    await discoverCommand({ scan: scanFlag });
     return;
   }
   
