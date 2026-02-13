@@ -483,7 +483,7 @@ It checks standard config file locations for Claude Desktop, Cursor, VS Code, an
 
 - **Trust Registry**: [agentaudit.dev](https://agentaudit.dev)
 - **Leaderboard**: [agentaudit.dev/leaderboard](https://agentaudit.dev/leaderboard)
-- **Skill Repository**: [github.com/starbuck100/agentaudit-skill](https://github.com/starbuck100/agentaudit-skill)
+- **Agent Skill**: [github.com/starbuck100/agentaudit-skill](https://github.com/starbuck100/agentaudit-skill) — Full agent skill with pre-install security gate, detection patterns & peer review system
 - **MCP Server Repository**: [github.com/starbuck100/agentaudit-mcp](https://github.com/starbuck100/agentaudit-mcp)
 - **Report Issues**: [GitHub Issues](https://github.com/starbuck100/agentaudit-mcp/issues)
 
