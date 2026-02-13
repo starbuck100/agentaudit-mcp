@@ -557,13 +557,34 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const data = await res.json();
         const risk = data.risk_score ?? data.latest_risk_score ?? 'unknown';
         const official = data.has_official_audit ? '✅ Officially audited' : 'Community audit';
+        const findings = data.total_findings ?? 0;
+        const maxSev = data.latest_max_severity;
+        const auditedAt = data.last_audited_at ? new Date(data.last_audited_at).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' }) : 'unknown';
+        const version = data.latest_known_version || null;
+        const isOutdated = data.is_outdated;
 
         let summary = `# ${package_name}\n\n`;
         summary += `**Risk Score:** ${risk}/100\n`;
         summary += `**Status:** ${official}\n`;
+        summary += `**Findings:** ${findings}${maxSev ? ` (max severity: ${maxSev})` : ''}\n`;
+        summary += `**Last Audited:** ${auditedAt}\n`;
+        if (version) summary += `**Audited Version:** ${version}\n`;
+        if (isOutdated) summary += `**⚠️ OUTDATED:** The package has been updated since the last audit!\n`;
         if (data.source_url) summary += `**Source:** ${data.source_url}\n`;
         summary += `**Registry:** ${REGISTRY_URL}/skills/${package_name}\n\n`;
-        summary += `## Full Data\n\`\`\`json\n${JSON.stringify(data, null, 2)}\n\`\`\``;
+
+        // Agent instructions based on risk level
+        if (typeof risk === 'number' && risk >= 40) {
+          summary += `\n🚨 HIGH RISK (${risk}/100): IMPORTANT — Tell the user this package has significant security findings and may be UNSAFE to install. Recommend reviewing the findings at ${REGISTRY_URL}/skills/${package_name} before proceeding. If the user still wants to install, strongly warn about the risks.\n`;
+        } else if (typeof risk === 'number' && risk >= 20) {
+          summary += `\n⚠️ MODERATE RISK (${risk}/100): Inform the user that this package has some security findings. Recommend reviewing them at ${REGISTRY_URL}/skills/${package_name} before installing.\n`;
+        } else if (typeof risk === 'number') {
+          summary += `\n✅ LOW RISK (${risk}/100): This package appears safe based on its security audit. The user can proceed with installation.\n`;
+        }
+
+        if (isOutdated) {
+          summary += `\n⚠️ NOTE: The audit may be outdated — the package has changed since it was last reviewed. Consider running a fresh audit with audit_package.\n`;
+        }
 
         return { content: [{ type: 'text', text: summary }] };
       } catch (err) {
