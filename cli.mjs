@@ -702,6 +702,19 @@ function extractServersFromConfig(config) {
     const pyMatch = allArgs.match(/(?:uvx|pip run|python -m)\s+(@?[a-z0-9][\w./-]*)/i);
     if (pyMatch) info.pyPackage = pyMatch[1];
     
+    // URL-based MCP server (remote HTTP)
+    if (info.url && !info.npmPackage && !info.pyPackage) {
+      try {
+        const parsed = new URL(info.url);
+        // Extract service name from hostname: mcp.supabase.com → supabase
+        const hostParts = parsed.hostname.split('.');
+        if (hostParts.length >= 2) {
+          const serviceName = hostParts.length === 3 ? hostParts[1] : hostParts[0];
+          info.remoteService = serviceName;
+        }
+      } catch {}
+    }
+    
     result.push(info);
   }
   return result;
@@ -751,6 +764,39 @@ async function resolveSourceUrl(server) {
       }
     } catch {}
     return `https://pypi.org/project/${server.pyPackage}/`;
+  }
+  
+  // URL-based remote MCP server — try GitHub search by service name
+  if (server.remoteService) {
+    // Try npm registry with common MCP naming patterns
+    for (const tryName of [
+      `@${server.remoteService}/mcp-server-${server.remoteService}`,
+      `${server.remoteService}-mcp`,
+      `mcp-server-${server.remoteService}`,
+      server.remoteService,
+    ]) {
+      try {
+        const res = await fetch(`https://registry.npmjs.org/${encodeURIComponent(tryName)}`, {
+          signal: AbortSignal.timeout(3000),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          let repoUrl = data.repository?.url;
+          if (repoUrl) {
+            repoUrl = repoUrl.replace(/^git\+/, '').replace(/\.git$/, '').replace(/^ssh:\/\/git@github\.com/, 'https://github.com');
+            if (repoUrl.startsWith('http')) return repoUrl;
+          }
+        }
+      } catch {}
+    }
+  }
+  
+  // Last resort: if server has a url, show it as context
+  if (server.url) {
+    try {
+      const parsed = new URL(server.url);
+      return `https://github.com/search?q=${encodeURIComponent(parsed.hostname + ' MCP')}&type=repositories`;
+    } catch {}
   }
   
   return null;
@@ -821,6 +867,7 @@ async function discoverCommand() {
       let sourceLabel = '';
       if (server.npmPackage) sourceLabel = `${c.dim}npm:${server.npmPackage}${c.reset}`;
       else if (server.pyPackage) sourceLabel = `${c.dim}pip:${server.pyPackage}${c.reset}`;
+      else if (server.url) sourceLabel = `${c.dim}${server.url.length > 60 ? server.url.slice(0, 57) + '...' : server.url}${c.reset}`;
       else if (server.command) sourceLabel = `${c.dim}${[server.command, ...server.args.slice(0, 2)].join(' ')}${c.reset}`;
       
       if (regData) {

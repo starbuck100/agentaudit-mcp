@@ -176,12 +176,21 @@ function discoverMcpServers() {
       const allArgs = [cfg.command, ...(cfg.args || [])].filter(Boolean).join(' ');
       const npxMatch = allArgs.match(/npx\s+(?:-y\s+)?(@?[a-z0-9][\w./-]*)/i);
       const pyMatch = allArgs.match(/(?:uvx|pip run|python -m)\s+(@?[a-z0-9][\w./-]*)/i);
+      let remoteService = null;
+      if (cfg.url) {
+        try {
+          const hostParts = new URL(cfg.url).hostname.split('.');
+          remoteService = hostParts.length === 3 ? hostParts[1] : hostParts[0];
+        } catch {}
+      }
       servers.push({
         name,
         command: cfg.command || null,
         args: cfg.args || [],
+        url: cfg.url || null,
         npm_package: npxMatch?.[1] || null,
         pip_package: pyMatch?.[1] || null,
+        remote_service: remoteService,
       });
     }
     results.push({ platform: c.platform, config_path: c.path, status: 'found', server_count: servers.length, servers });
@@ -220,6 +229,28 @@ async function resolveSourceUrl(server) {
       }
     } catch {}
     return `https://pypi.org/project/${server.pip_package}/`;
+  }
+  // URL-based remote MCP — try npm with common naming patterns
+  if (server.remote_service) {
+    for (const tryName of [
+      `@${server.remote_service}/mcp-server-${server.remote_service}`,
+      `${server.remote_service}-mcp`,
+      `mcp-server-${server.remote_service}`,
+    ]) {
+      try {
+        const res = await fetch(`https://registry.npmjs.org/${encodeURIComponent(tryName)}`, {
+          signal: AbortSignal.timeout(3000),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          let repoUrl = data.repository?.url;
+          if (repoUrl) {
+            repoUrl = repoUrl.replace(/^git\+/, '').replace(/\.git$/, '');
+            if (repoUrl.startsWith('http')) return repoUrl;
+          }
+        }
+      } catch {}
+    }
   }
   return null;
 }
@@ -332,9 +363,14 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             || srv.name.toLowerCase().replace(/[^a-z0-9-]/gi, '-');
 
           text += `### ${srv.name}\n`;
-          text += `- Command: \`${[srv.command, ...srv.args].join(' ')}\`\n`;
+          if (srv.url) {
+            text += `- URL: \`${srv.url}\`\n`;
+          } else {
+            text += `- Command: \`${[srv.command, ...srv.args].filter(Boolean).join(' ')}\`\n`;
+          }
           if (srv.npm_package) text += `- npm: ${srv.npm_package}\n`;
           if (srv.pip_package) text += `- pip: ${srv.pip_package}\n`;
+          if (srv.remote_service) text += `- Service: ${srv.remote_service}\n`;
 
           if (doRegistryCheck) {
             const regData = await checkRegistry(slug);
