@@ -190,6 +190,40 @@ function discoverMcpServers() {
   return results;
 }
 
+async function resolveSourceUrl(server) {
+  if (server.npm_package) {
+    try {
+      const res = await fetch(`https://registry.npmjs.org/${encodeURIComponent(server.npm_package)}`, {
+        signal: AbortSignal.timeout(5000),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        let repoUrl = data.repository?.url;
+        if (repoUrl) {
+          repoUrl = repoUrl.replace(/^git\+/, '').replace(/\.git$/, '').replace(/^ssh:\/\/git@github\.com/, 'https://github.com');
+          if (repoUrl.startsWith('http')) return repoUrl;
+        }
+      }
+    } catch {}
+    return `https://www.npmjs.com/package/${server.npm_package}`;
+  }
+  if (server.pip_package) {
+    try {
+      const res = await fetch(`https://pypi.org/pypi/${encodeURIComponent(server.pip_package)}/json`, {
+        signal: AbortSignal.timeout(5000),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const urls = data.info?.project_urls || {};
+        const source = urls.Source || urls.Repository || urls.Homepage || urls['Source Code'] || data.info?.home_page;
+        if (source && source.startsWith('http')) return source;
+      }
+    } catch {}
+    return `https://pypi.org/project/${server.pip_package}/`;
+  }
+  return null;
+}
+
 async function checkRegistry(slug) {
   try {
     const res = await fetch(`${REGISTRY_URL}/api/skills/${encodeURIComponent(slug)}`, {
@@ -310,8 +344,15 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
               text += `- **Registry: ✅ Audited** — Risk ${risk}/100${official}\n`;
               text += `- Report: ${REGISTRY_URL}/skills/${slug}\n`;
             } else {
+              const sourceUrl = await resolveSourceUrl(srv);
               text += `- **Registry: ⚠️ Not audited** — no audit report found\n`;
-              text += `- To audit: call \`audit_package\` with the source URL\n`;
+              if (sourceUrl) {
+                text += `- Source: ${sourceUrl}\n`;
+                text += `- To audit: call \`audit_package\` with source_url \`${sourceUrl}\`\n`;
+              } else {
+                text += `- Source URL unknown — check the package's GitHub/npm page\n`;
+                text += `- To audit: find the source URL, then call \`audit_package\`\n`;
+              }
             }
           }
           text += `\n`;

@@ -157,17 +157,26 @@ async function setupCommand() {
 
   console.log();
   console.log(`  ${c.bold}Ready!${c.reset} You can now:`);
-  console.log(`  ${c.dim}•${c.reset} Scan packages:  ${c.cyan}agentaudit scan <repo-url>${c.reset}`);
-  console.log(`  ${c.dim}•${c.reset} Check registry:  ${c.cyan}agentaudit check <name>${c.reset}`);
+  console.log(`  ${c.dim}•${c.reset} Discover servers: ${c.cyan}agentaudit discover${c.reset}`);
+  console.log(`  ${c.dim}•${c.reset} Audit packages:   ${c.cyan}agentaudit audit <repo-url>${c.reset}  ${c.dim}(deep LLM analysis)${c.reset}`);
+  console.log(`  ${c.dim}•${c.reset} Quick scan:        ${c.cyan}agentaudit scan <repo-url>${c.reset}  ${c.dim}(regex-based)${c.reset}`);
+  console.log(`  ${c.dim}•${c.reset} Check registry:    ${c.cyan}agentaudit check <name>${c.reset}`);
   console.log(`  ${c.dim}•${c.reset} Submit reports via MCP in Claude/Cursor/Windsurf`);
   console.log();
 }
 
 // ── Helpers ──────────────────────────────────────────────
 
+function getVersion() {
+  try {
+    const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, 'package.json'), 'utf8'));
+    return pkg.version || '0.0.0';
+  } catch { return '0.0.0'; }
+}
+
 function banner() {
   console.log();
-  console.log(`  ${c.bold}${c.cyan}AgentAudit${c.reset} ${c.dim}v1.0.0${c.reset}`);
+  console.log(`  ${c.bold}${c.cyan}AgentAudit${c.reset} ${c.dim}v${getVersion()}${c.reset}`);
   console.log(`  ${c.dim}Security scanner for AI packages${c.reset}`);
   console.log();
 }
@@ -705,6 +714,48 @@ function serverSlug(server) {
   return server.name.toLowerCase().replace(/[^a-z0-9-]/gi, '-');
 }
 
+async function resolveSourceUrl(server) {
+  // Already have it
+  if (server.sourceUrl) return server.sourceUrl;
+  
+  // Try npm registry
+  if (server.npmPackage) {
+    try {
+      const res = await fetch(`https://registry.npmjs.org/${encodeURIComponent(server.npmPackage)}`, {
+        signal: AbortSignal.timeout(5000),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        let repoUrl = data.repository?.url;
+        if (repoUrl) {
+          repoUrl = repoUrl.replace(/^git\+/, '').replace(/\.git$/, '').replace(/^ssh:\/\/git@github\.com/, 'https://github.com');
+          if (repoUrl.startsWith('http')) return repoUrl;
+        }
+      }
+    } catch {}
+    // Fallback: npm page
+    return `https://www.npmjs.com/package/${server.npmPackage}`;
+  }
+  
+  // Try PyPI
+  if (server.pyPackage) {
+    try {
+      const res = await fetch(`https://pypi.org/pypi/${encodeURIComponent(server.pyPackage)}/json`, {
+        signal: AbortSignal.timeout(5000),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const urls = data.info?.project_urls || {};
+        const source = urls.Source || urls.Repository || urls.Homepage || urls['Source Code'] || data.info?.home_page;
+        if (source && source.startsWith('http')) return source;
+      }
+    } catch {}
+    return `https://pypi.org/project/${server.pyPackage}/`;
+  }
+  
+  return null;
+}
+
 async function discoverCommand() {
   console.log(`  ${c.bold}Discovering local MCP servers...${c.reset}`);
   console.log();
@@ -728,6 +779,7 @@ async function discoverCommand() {
   let checkedServers = 0;
   let auditedServers = 0;
   let unauditedServers = 0;
+  const unauditedWithUrls = [];
   
   for (const config of configs) {
     const servers = extractServersFromConfig(config.content);
@@ -779,11 +831,18 @@ async function discoverCommand() {
         console.log(`${pipe}  ${riskBadge(riskScore)} Risk ${riskScore}  ${hasOfficial ? `${c.green}✔ official${c.reset}  ` : ''}${c.dim}${REGISTRY_URL}/skills/${slug}${c.reset}`);
       } else {
         unauditedServers++;
+        // Resolve source URL
+        const resolvedUrl = await resolveSourceUrl(server);
         console.log(`${branch}  ${c.bold}${server.name}${c.reset}    ${sourceLabel}`);
-        console.log(`${pipe}  ${c.yellow}⚠ not audited${c.reset}  ${c.dim}Run: agentaudit audit <source-url>${c.reset}`);
+        if (resolvedUrl) {
+          console.log(`${pipe}  ${c.yellow}⚠ not audited${c.reset}  ${c.dim}Run: ${c.cyan}agentaudit audit ${resolvedUrl}${c.reset}`);
+          unauditedWithUrls.push({ name: server.name, sourceUrl: resolvedUrl });
+        } else {
+          console.log(`${pipe}  ${c.yellow}⚠ not audited${c.reset}  ${c.dim}Source URL unknown — check the package's GitHub/npm page${c.reset}`);
+        }
       }
       
-      if (server.sourceUrl) {
+      if (server.sourceUrl && !server.sourceUrl.includes('npmjs.com')) {
         console.log(`${pipe}  ${c.dim}source: ${server.sourceUrl}${c.reset}`);
       }
     }
@@ -800,8 +859,15 @@ async function discoverCommand() {
   console.log();
   
   if (unauditedServers > 0) {
-    console.log(`  ${c.dim}To audit unaudited servers, run:${c.reset}`);
-    console.log(`  ${c.cyan}agentaudit scan <github-url>${c.reset}`);
+    if (unauditedWithUrls.length > 0) {
+      console.log(`  ${c.dim}To audit unaudited servers:${c.reset}`);
+      for (const { name, sourceUrl } of unauditedWithUrls) {
+        console.log(`  ${c.cyan}agentaudit audit ${sourceUrl}${c.reset}  ${c.dim}(${name})${c.reset}`);
+      }
+    } else {
+      console.log(`  ${c.dim}To audit unaudited servers, run:${c.reset}`);
+      console.log(`  ${c.cyan}agentaudit audit <source-url>${c.reset}`);
+    }
     console.log();
   }
 }
@@ -857,15 +923,28 @@ async function auditRepo(url) {
   const openaiKey = process.env.OPENAI_API_KEY;
   
   if (!anthropicKey && !openaiKey) {
-    // No LLM API key — output the prepared audit for piping or MCP use
+    // No LLM API key — clear explanation
     console.log();
-    console.log(`  ${c.yellow}No LLM API key found.${c.reset} To run the audit automatically, set one of:`);
-    console.log(`    ${c.dim}export ANTHROPIC_API_KEY=sk-ant-...${c.reset}`);
-    console.log(`    ${c.dim}export OPENAI_API_KEY=sk-...${c.reset}`);
+    console.log(`  ${c.yellow}No LLM API key found.${c.reset} The ${c.bold}audit${c.reset} command needs an LLM to analyze code.`);
     console.log();
-    console.log(`  ${c.bold}Alternatives:${c.reset}`);
-    console.log(`    ${c.dim}1.${c.reset} Use the MCP server in Claude/Cursor — your agent runs the audit automatically`);
-    console.log(`    ${c.dim}2.${c.reset} Export for manual review: ${c.cyan}agentaudit audit ${url} --export${c.reset}`);
+    console.log(`  ${c.bold}Option 1: Set an API key${c.reset}`);
+    console.log(`  Supported keys: ${c.cyan}ANTHROPIC_API_KEY${c.reset} or ${c.cyan}OPENAI_API_KEY${c.reset}`);
+    console.log();
+    console.log(`  ${c.dim}# Linux / macOS:${c.reset}`);
+    console.log(`  ${c.dim}export ANTHROPIC_API_KEY=sk-ant-...${c.reset}`);
+    console.log(`  ${c.dim}export OPENAI_API_KEY=sk-...${c.reset}`);
+    console.log();
+    console.log(`  ${c.dim}# Windows (PowerShell):${c.reset}`);
+    console.log(`  ${c.dim}$env:ANTHROPIC_API_KEY = "sk-ant-..."${c.reset}`);
+    console.log(`  ${c.dim}$env:OPENAI_API_KEY = "sk-..."${c.reset}`);
+    console.log();
+    console.log(`  ${c.bold}Option 2: Export for manual review${c.reset}`);
+    console.log(`  ${c.cyan}agentaudit audit ${url} --export${c.reset}`);
+    console.log(`  ${c.dim}Creates a markdown file you can paste into any LLM (Claude, ChatGPT, etc.)${c.reset}`);
+    console.log();
+    console.log(`  ${c.bold}Option 3: Use MCP in Claude/Cursor/Windsurf (no API key needed)${c.reset}`);
+    console.log(`  ${c.dim}Add AgentAudit as MCP server — your editor's agent runs the audit using its own LLM.${c.reset}`);
+    console.log(`  ${c.dim}Config: { "mcpServers": { "agentaudit": { "command": "npx", "args": ["-y", "agentaudit"] } } }${c.reset}`);
     console.log();
     
     // Check if --export flag

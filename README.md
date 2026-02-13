@@ -15,16 +15,52 @@ MCP server for agents + standalone CLI for humans.
 
 ---
 
-## Quick Start
+## Getting Started
+
+There are two ways to use AgentAudit:
+
+### Option A: MCP Server in your AI editor (recommended)
+
+Add AgentAudit to Claude Desktop, Cursor, or Windsurf. **No API key needed** — your editor's agent runs audits using its own LLM.
+
+```json
+{
+  "mcpServers": {
+    "agentaudit": {
+      "command": "npx",
+      "args": ["-y", "agentaudit"]
+    }
+  }
+}
+```
+
+Then just ask your agent: *"Check which MCP servers I have installed and audit any unaudited ones."*
+
+### Option B: CLI
 
 ```bash
+# Install
+npm install -g agentaudit    # or use npx agentaudit <command>
+
+# 1. Discover your MCP servers
 npx agentaudit discover
+
+# 2. Audit unaudited packages (needs an LLM API key)
+export ANTHROPIC_API_KEY=sk-ant-...    # or OPENAI_API_KEY=sk-...
+npx agentaudit audit https://github.com/owner/repo
+
+# 3. (Optional) Register to upload reports to the public registry
+npx agentaudit setup
 ```
 
-That's it. Finds all MCP servers on your machine and checks them against the security registry.
+> **Note:** The `audit` command requires an LLM API key (`ANTHROPIC_API_KEY` or `OPENAI_API_KEY`) to analyze code. The `discover`, `scan`, and `check` commands work without one. If you don't have an API key, use `--export` to generate a markdown file you can paste into any LLM, or use AgentAudit as an MCP server (Option A) where no extra key is needed.
+
+### Quick example
 
 ```
-AgentAudit v3.2.0
+$ npx agentaudit discover
+
+  AgentAudit v3.3.0
   Security scanner for AI packages
 
 •  Scanning Claude Desktop  ~/.claude/mcp.json    found 2 servers
@@ -32,21 +68,15 @@ AgentAudit v3.2.0
 ├──  fastmcp-demo       npm:fastmcp
 │    SAFE  Risk 0  ✔ official  https://agentaudit.dev/skills/fastmcp
 └──  my-tool            npm:some-mcp-tool
-     ⚠ not audited      Run: agentaudit audit <source-url>
+     ⚠ not audited      Run: agentaudit audit https://github.com/user/some-mcp-tool
 
-────────────────────────────────────────────────────────
   Summary  2 servers across 1 config
 
   ✔  1 audited
   ⚠  1 not audited
-```
 
-## Install
-
-```bash
-npm install -g agentaudit    # global install
-# or use directly:
-npx agentaudit <command>
+  To audit unaudited servers:
+  agentaudit audit https://github.com/user/some-mcp-tool  (my-tool)
 ```
 
 ---
