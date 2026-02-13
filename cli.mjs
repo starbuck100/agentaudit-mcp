@@ -1,16 +1,16 @@
 #!/usr/bin/env node
 /**
- * AgentAudit CLI — Beautiful terminal output for security audits
+ * AgentAudit CLI — Security scanner for AI packages
  * 
  * Usage:
- *   agentaudit setup                              Interactive setup (register + API key)
- *   agentaudit scan <repo-url> [repo-url...]       Scan repositories
- *   agentaudit check <package-name>                Look up in registry
+ *   agentaudit                                     Discover local MCP servers
+ *   agentaudit discover [--quick|--deep]            Find MCP servers in AI editors
+ *   agentaudit scan <repo-url> [--deep]             Quick scan (or deep audit with --deep)
+ *   agentaudit audit <repo-url>                     Deep LLM-powered security audit
+ *   agentaudit lookup <name>                        Look up package in registry
+ *   agentaudit setup                                Register + configure API key
  * 
- * Examples:
- *   agentaudit setup
- *   agentaudit scan https://github.com/owner/repo
- *   agentaudit scan repo1 repo2 repo3
+ * Global flags: --json, --quiet, --no-color
  */
 
 import fs from 'fs';
@@ -24,9 +24,19 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SKILL_DIR = path.resolve(__dirname);
 const REGISTRY_URL = 'https://agentaudit.dev';
 
-// ── ANSI Colors ──────────────────────────────────────────
+// ── Global flags (set in main before command routing) ────
+let jsonMode = false;
+let quietMode = false;
 
-const c = {
+// ── ANSI Colors (respects NO_COLOR and --no-color) ───────
+
+const noColor = !!(process.env.NO_COLOR || process.argv.includes('--no-color'));
+
+const c = noColor ? {
+  reset: '', bold: '', dim: '', red: '', green: '', yellow: '',
+  blue: '', magenta: '', cyan: '', white: '', gray: '',
+  bgRed: '', bgGreen: '', bgYellow: '',
+} : {
   reset: '\x1b[0m',
   bold: '\x1b[1m',
   dim: '\x1b[2m',
@@ -281,6 +291,7 @@ function getVersion() {
 }
 
 function banner() {
+  if (quietMode || jsonMode) return;
   console.log();
   console.log(`  ${c.bold}${c.cyan}AgentAudit${c.reset} ${c.dim}v${getVersion()}${c.reset}`);
   console.log(`  ${c.dim}Security scanner for AI packages${c.reset}`);
@@ -676,7 +687,7 @@ async function scanRepo(url) {
   const start = Date.now();
   const slug = slugFromUrl(url);
   
-  process.stdout.write(`${icons.scan}  Scanning ${c.bold}${slug}${c.reset} ${c.dim}...${c.reset}`);
+  if (!jsonMode) process.stdout.write(`${icons.scan}  Scanning ${c.bold}${slug}${c.reset} ${c.dim}...${c.reset}`);
   
   // Clone
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentaudit-'));
@@ -687,10 +698,12 @@ async function scanRepo(url) {
       stdio: 'pipe',
     });
   } catch (err) {
-    process.stdout.write(`  ${c.red}✖ clone failed${c.reset}\n`);
-    const msg = err.stderr?.toString().trim() || err.message?.split('\n')[0] || '';
-    if (msg) console.log(`    ${c.dim}${msg}${c.reset}`);
-    console.log(`    ${c.dim}Make sure git is installed and the URL is accessible.${c.reset}`);
+    if (!jsonMode) {
+      process.stdout.write(`  ${c.red}✖ clone failed${c.reset}\n`);
+      const msg = err.stderr?.toString().trim() || err.message?.split('\n')[0] || '';
+      if (msg) console.log(`    ${c.dim}${msg}${c.reset}`);
+      console.log(`    ${c.dim}Make sure git is installed and the URL is accessible.${c.reset}`);
+    }
     return null;
   }
   
@@ -711,11 +724,13 @@ async function scanRepo(url) {
   
   const duration = elapsed(start);
   
-  // Clear the "Scanning..." line
-  process.stdout.write('\r\x1b[K');
-  
-  // Print result
-  printScanResult(url, info, files, findings, registryData, duration);
+  if (!jsonMode) {
+    // Clear the "Scanning..." line
+    process.stdout.write('\r\x1b[K');
+    
+    // Print result
+    printScanResult(url, info, files, findings, registryData, duration);
+  }
   
   return { slug, url, info, files: files.length, findings, registryData, duration };
 }
@@ -941,8 +956,10 @@ async function discoverCommand(options = {}) {
   const autoScan = options.scan || false;
   const interactiveAudit = options.audit || false;
   
-  console.log(`  ${c.bold}Discovering local MCP servers...${c.reset}`);
-  console.log();
+  if (!jsonMode) {
+    console.log(`  ${c.bold}Discovering MCP servers in your AI editors...${c.reset}`);
+    console.log();
+  }
   
   const configs = findMcpConfigs();
   
@@ -1096,10 +1113,10 @@ async function discoverCommand(options = {}) {
         console.log();
         if (serversWithFindings > 0) {
           console.log(`  ${c.yellow}${serversWithFindings}/${scanResults.length} server${scanResults.length !== 1 ? 's' : ''} with findings (${totalFindings} total)${c.reset}`);
-          console.log(`  ${c.dim}Run ${c.cyan}agentaudit audit <url>${c.dim} for deep LLM analysis on flagged servers${c.reset}`);
+          console.log(`  ${c.dim}Run ${c.cyan}agentaudit scan <url> --deep${c.dim} for deep LLM analysis on flagged servers${c.reset}`);
         } else {
           console.log(`  ${c.green}All servers passed quick scan${c.reset}`);
-          console.log(`  ${c.dim}Run ${c.cyan}agentaudit audit <url>${c.dim} for thorough LLM-powered analysis${c.reset}`);
+          console.log(`  ${c.dim}Run ${c.cyan}agentaudit scan <url> --deep${c.dim} for thorough LLM-powered analysis${c.reset}`);
         }
         console.log();
       }
@@ -1157,8 +1174,13 @@ async function discoverCommand(options = {}) {
       console.log(`  ${c.cyan}agentaudit audit <source-url>${c.reset}`);
     }
     console.log();
-    console.log(`  ${c.dim}Or run ${c.cyan}agentaudit discover --scan${c.dim} to quick-scan all servers${c.reset}`);
-    console.log(`  ${c.dim}Or run ${c.cyan}agentaudit discover --audit${c.dim} to select & deep-audit interactively${c.reset}`);
+    console.log(`  ${c.dim}Or run ${c.cyan}agentaudit discover --quick${c.dim} to quick-scan all servers${c.reset}`);
+    console.log(`  ${c.dim}Or run ${c.cyan}agentaudit discover --deep${c.dim} to select & deep-audit interactively${c.reset}`);
+    console.log();
+  }
+  
+  if (!autoScan && !interactiveAudit && !jsonMode) {
+    console.log(`  ${c.dim}Looking for general package scanning? Try ${c.cyan}pip audit${c.dim} or ${c.cyan}npm audit${c.dim}.${c.reset}`);
     console.log();
   }
 }
@@ -1416,57 +1438,83 @@ async function auditRepo(url) {
 // ── Check command ───────────────────────────────────────
 
 async function checkPackage(name) {
-  console.log(`${icons.info}  Looking up ${c.bold}${name}${c.reset} in registry...`);
-  console.log();
+  if (!jsonMode) {
+    console.log(`${icons.info}  Looking up ${c.bold}${name}${c.reset} in registry...`);
+    console.log();
+  }
   
   const data = await checkRegistry(name);
   if (!data) {
-    console.log(`  ${c.yellow}Not found${c.reset} — package "${name}" hasn't been audited yet.`);
-    console.log(`  ${c.dim}Run: agentaudit audit <repo-url> for a deep LLM audit${c.reset}`);
-    return;
+    if (!jsonMode) {
+      console.log(`  ${c.yellow}Not found${c.reset} — package "${name}" hasn't been audited yet.`);
+      console.log(`  ${c.dim}Run: agentaudit audit <repo-url> for a deep LLM audit${c.reset}`);
+    }
+    return null;
   }
   
-  const riskScore = data.risk_score ?? data.latest_risk_score ?? 0;
-  console.log(`  ${c.bold}${name}${c.reset}  ${riskBadge(riskScore)}`);
-  console.log(`  ${c.dim}Risk Score: ${riskScore}/100${c.reset}`);
-  if (data.source_url) console.log(`  ${c.dim}Source: ${data.source_url}${c.reset}`);
-  console.log(`  ${c.dim}Registry: ${REGISTRY_URL}/skills/${name}${c.reset}`);
-  if (data.has_official_audit) console.log(`  ${c.green}✔ Officially audited${c.reset}`);
-  console.log();
+  if (!jsonMode) {
+    const riskScore = data.risk_score ?? data.latest_risk_score ?? 0;
+    console.log(`  ${c.bold}${name}${c.reset}  ${riskBadge(riskScore)}`);
+    console.log(`  ${c.dim}Risk Score: ${riskScore}/100${c.reset}`);
+    if (data.source_url) console.log(`  ${c.dim}Source: ${data.source_url}${c.reset}`);
+    console.log(`  ${c.dim}Registry: ${REGISTRY_URL}/skills/${name}${c.reset}`);
+    if (data.has_official_audit) console.log(`  ${c.green}✔ Officially audited${c.reset}`);
+    console.log();
+  }
+  return data;
 }
 
 // ── Main ────────────────────────────────────────────────
 
 async function main() {
-  const args = process.argv.slice(2);
+  const rawArgs = process.argv.slice(2);
+  
+  // Parse global flags early
+  jsonMode = rawArgs.includes('--json');
+  quietMode = rawArgs.includes('--quiet') || rawArgs.includes('-q');
+  // --no-color already handled at top level for `c` object
+  
+  // Strip global flags from args
+  const globalFlags = new Set(['--json', '--quiet', '-q', '--no-color']);
+  const args = rawArgs.filter(a => !globalFlags.has(a));
   
   if (args[0] === '-v' || args[0] === '--version') {
     console.log(`agentaudit ${getVersion()}`);
     process.exit(0);
   }
   
-  if (args.length === 0 || args[0] === '--help' || args[0] === '-h') {
+  if (args[0] === '--help' || args[0] === '-h') {
     banner();
     console.log(`  ${c.bold}Commands:${c.reset}`);
     console.log();
-    console.log(`    ${c.cyan}agentaudit discover${c.reset}                         Find local MCP servers + check registry`);
-    console.log(`    ${c.cyan}agentaudit discover --scan${c.reset}                  Discover + auto-scan all servers`);
-    console.log(`    ${c.cyan}agentaudit discover --audit${c.reset}                 Discover + select servers to deep-audit`);
+    console.log(`    ${c.cyan}agentaudit${c.reset}                                   Discover MCP servers (same as discover)`);
+    console.log(`    ${c.cyan}agentaudit discover${c.reset}                          Find MCP servers in your AI editors (Cursor, Claude, VS Code, Windsurf)`);
+    console.log(`    ${c.cyan}agentaudit discover --quick${c.reset}                  Discover + auto-scan all servers`);
+    console.log(`    ${c.cyan}agentaudit discover --deep${c.reset}                   Discover + select servers to deep-audit`);
     console.log(`    ${c.cyan}agentaudit scan${c.reset} <url> [url...]               Quick static scan (regex, local)`);
+    console.log(`    ${c.cyan}agentaudit scan${c.reset} <url> ${c.dim}--deep${c.reset}                Deep audit (same as audit)`);
     console.log(`    ${c.cyan}agentaudit audit${c.reset} <url> [url...]              Deep LLM-powered security audit`);
-    console.log(`    ${c.cyan}agentaudit check${c.reset} <name>                      Look up package in registry`);
+    console.log(`    ${c.cyan}agentaudit lookup${c.reset} <name>                     Look up package in registry`);
     console.log(`    ${c.cyan}agentaudit setup${c.reset}                             Register + configure API key`);
     console.log();
-    console.log(`  ${c.bold}scan${c.reset} vs ${c.bold}audit${c.reset}:`);
+    console.log(`  ${c.bold}Global flags:${c.reset}`);
+    console.log(`    ${c.dim}--json       Output JSON to stdout (machine-readable)${c.reset}`);
+    console.log(`    ${c.dim}--quiet      Suppress banner and tree visualization${c.reset}`);
+    console.log(`    ${c.dim}--no-color   Disable ANSI colors (also: NO_COLOR env)${c.reset}`);
+    console.log();
+    console.log(`  ${c.bold}Quick Scan${c.reset} vs ${c.bold}Deep Audit${c.reset}:`);
     console.log(`    ${c.dim}scan  = fast regex-based static analysis (~2s)${c.reset}`);
     console.log(`    ${c.dim}audit = deep LLM analysis with 3-pass methodology (~30s)${c.reset}`);
     console.log();
+    console.log(`  ${c.bold}Exit codes:${c.reset}`);
+    console.log(`    ${c.dim}0 = clean / success    1 = findings detected    2 = error${c.reset}`);
+    console.log();
     console.log(`  ${c.bold}Examples:${c.reset}`);
-    console.log(`    agentaudit discover`);
-    console.log(`    agentaudit discover --scan`);
+    console.log(`    agentaudit`);
+    console.log(`    agentaudit discover --quick`);
     console.log(`    agentaudit scan https://github.com/owner/repo`);
     console.log(`    agentaudit audit https://github.com/owner/repo`);
-    console.log(`    agentaudit check fastmcp`);
+    console.log(`    agentaudit lookup fastmcp --json`);
     console.log();
     console.log(`  ${c.bold}For deep audits,${c.reset} set an LLM API key:`);
     if (process.platform === 'win32') {
@@ -1484,7 +1532,8 @@ async function main() {
     process.exit(0);
   }
   
-  const command = args[0];
+  // Default no-arg → discover
+  const command = args.length === 0 ? 'discover' : args[0];
   const targets = args.slice(1);
   
   banner();
@@ -1495,38 +1544,79 @@ async function main() {
   }
   
   if (command === 'discover') {
-    const scanFlag = targets.includes('--scan') || targets.includes('-s');
-    const auditFlag = targets.includes('--audit') || targets.includes('-a');
+    const scanFlag = targets.includes('--quick') || targets.includes('--scan') || targets.includes('-s');
+    const auditFlag = targets.includes('--deep') || targets.includes('--audit') || targets.includes('-a');
     await discoverCommand({ scan: scanFlag, audit: auditFlag });
     return;
   }
   
-  if (command === 'check') {
-    if (targets.length === 0) {
+  if (command === 'lookup' || command === 'check') {
+    const names = targets.filter(t => !t.startsWith('--'));
+    if (names.length === 0) {
       console.log(`  ${c.red}Error: package name required${c.reset}`);
-      process.exit(1);
+      process.exit(2);
     }
-    for (const t of targets) await checkPackage(t);
+    const results = [];
+    for (const t of names) {
+      const data = await checkPackage(t);
+      results.push(data);
+    }
+    if (jsonMode) {
+      console.log(JSON.stringify(results.length === 1 ? (results[0] || { error: 'not_found' }) : results, null, 2));
+    }
+    process.exit(0);
     return;
   }
   
   if (command === 'scan') {
-    if (targets.length === 0) {
+    const deepFlag = targets.includes('--deep');
+    const urls = targets.filter(t => !t.startsWith('--'));
+    if (urls.length === 0) {
       console.log(`  ${c.red}Error: at least one repository URL required${c.reset}`);
       console.log(`  ${c.dim}Tip: use ${c.cyan}agentaudit discover${c.dim} to find & check locally installed MCP servers${c.reset}`);
       console.log(`  ${c.dim}Tip: use ${c.cyan}agentaudit audit <url>${c.dim} for a deep LLM-powered audit${c.reset}`);
-      process.exit(1);
+      process.exit(2);
+    }
+    
+    // --deep redirects to audit flow
+    if (deepFlag) {
+      let hasFindings = false;
+      for (const url of urls) {
+        const report = await auditRepo(url);
+        if (report?.findings?.length > 0) hasFindings = true;
+      }
+      process.exit(hasFindings ? 1 : 0);
+      return;
     }
     
     const results = [];
-    for (const url of targets) {
+    for (const url of urls) {
       const result = await scanRepo(url);
       if (result) results.push(result);
+      else process.exitCode = 2;
     }
     
-    if (results.length > 1) {
+    if (jsonMode) {
+      const jsonOut = results.map(r => ({
+        slug: r.slug,
+        url: r.url,
+        findings: r.findings.map(f => ({
+          severity: f.severity,
+          title: f.title,
+          file: f.file,
+          line: f.line,
+          snippet: f.snippet,
+        })),
+        fileCount: r.files,
+        duration: r.duration,
+      }));
+      console.log(JSON.stringify(jsonOut.length === 1 ? jsonOut[0] : jsonOut, null, 2));
+    } else if (results.length > 1) {
       printSummary(results);
     }
+    
+    const totalFindings = results.reduce((sum, r) => sum + r.findings.length, 0);
+    process.exit(totalFindings > 0 ? 1 : 0);
     return;
   }
   
@@ -1534,21 +1624,24 @@ async function main() {
     const urls = targets.filter(t => !t.startsWith('--'));
     if (urls.length === 0) {
       console.log(`  ${c.red}Error: at least one repository URL required${c.reset}`);
-      process.exit(1);
+      process.exit(2);
     }
     
+    let hasFindings = false;
     for (const url of urls) {
-      await auditRepo(url);
+      const report = await auditRepo(url);
+      if (report?.findings?.length > 0) hasFindings = true;
     }
+    process.exit(hasFindings ? 1 : 0);
     return;
   }
   
   console.log(`  ${c.red}Unknown command: ${command}${c.reset}`);
   console.log(`  ${c.dim}Run agentaudit --help for usage${c.reset}`);
-  process.exit(1);
+  process.exit(2);
 }
 
 main().catch(err => {
   console.error(`${c.red}Error: ${err.message}${c.reset}`);
-  process.exit(1);
+  process.exit(2);
 });

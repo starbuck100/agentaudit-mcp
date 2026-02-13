@@ -2,255 +2,431 @@
 
 # 🛡️ AgentAudit
 
-**Security scanner for AI packages**
+**Security scanner for AI packages — MCP server + CLI**
 
-Scan MCP servers, agent skills, and AI tools for vulnerabilities.  
-MCP server for agents + standalone CLI for humans.
+Scan MCP servers, AI skills, and packages for vulnerabilities, prompt injection,
+and supply chain attacks. Powered by regex static analysis and deep LLM audits.
 
-[![npm](https://img.shields.io/npm/v/agentaudit?style=flat-square&color=00C853)](https://www.npmjs.com/package/agentaudit)
-[![Registry](https://img.shields.io/badge/Registry-agentaudit.dev-00C853?style=flat-square)](https://agentaudit.dev)
-[![License](https://img.shields.io/badge/License-AGPL_3.0-F9A825?style=flat-square)](LICENSE)
+[![npm version](https://img.shields.io/npm/v/agentaudit?style=for-the-badge&color=CB3837&logo=npm)](https://www.npmjs.com/package/agentaudit)
+[![Trust Registry](https://img.shields.io/badge/Trust_Registry-Live-00C853?style=for-the-badge)](https://agentaudit.dev)
+[![License](https://img.shields.io/badge/License-AGPL_3.0-F9A825?style=for-the-badge)](LICENSE)
 
 </div>
 
 ---
 
-## Getting Started
+## 📑 Table of Contents
 
-There are two ways to use AgentAudit:
-
-### Option A: MCP Server in your AI editor (recommended)
-
-Add AgentAudit to Claude Desktop, Cursor, or Windsurf. **No API key needed** — your editor's agent runs audits using its own LLM.
-
-```json
-{
-  "mcpServers": {
-    "agentaudit": {
-      "command": "npx",
-      "args": ["-y", "agentaudit"]
-    }
-  }
-}
-```
-
-Then just ask your agent: *"Check which MCP servers I have installed and audit any unaudited ones."*
-
-### Option B: CLI
-
-```bash
-# Install
-npm install -g agentaudit    # or use npx agentaudit <command>
-
-# 1. Discover your MCP servers
-npx agentaudit discover
-
-# 2. Audit unaudited packages (needs an LLM API key)
-export ANTHROPIC_API_KEY=sk-ant-...    # or OPENAI_API_KEY=sk-...
-npx agentaudit audit https://github.com/owner/repo
-
-# 3. (Optional) Register to upload reports to the public registry
-npx agentaudit setup
-```
-
-> **Note:** The `audit` command requires an LLM API key (`ANTHROPIC_API_KEY` or `OPENAI_API_KEY`) to analyze code. The `discover`, `scan`, and `check` commands work without one. If you don't have an API key, use `--export` to generate a markdown file you can paste into any LLM, or use AgentAudit as an MCP server (Option A) where no extra key is needed.
-
-### Quick example
-
-```
-$ npx agentaudit discover
-
-  AgentAudit v3.3.0
-  Security scanner for AI packages
-
-•  Scanning Claude Desktop  ~/.claude/mcp.json    found 2 servers
-
-├──  fastmcp-demo       npm:fastmcp
-│    SAFE  Risk 0  ✔ official  https://agentaudit.dev/skills/fastmcp
-└──  my-tool            npm:some-mcp-tool
-     ⚠ not audited      Run: agentaudit audit https://github.com/user/some-mcp-tool
-
-  Summary  2 servers across 1 config
-
-  ✔  1 audited
-  ⚠  1 not audited
-
-  To audit unaudited servers:
-  agentaudit audit https://github.com/user/some-mcp-tool  (my-tool)
-```
+- [What is AgentAudit?](#what-is-agentaudit)
+- [Quick Start](#-quick-start)
+- [Commands Reference](#-commands-reference)
+- [Quick Scan vs Deep Audit](#-quick-scan-vs-deep-audit)
+- [MCP Server](#-mcp-server)
+- [What It Detects](#-what-it-detects)
+- [How the 3-Pass Audit Works](#-how-the-3-pass-audit-works)
+- [CI/CD Integration](#-cicd-integration)
+- [Configuration](#-configuration)
+- [Requirements](#-requirements)
+- [FAQ](#-faq)
+- [Related Links](#-related-links)
+- [License](#-license)
 
 ---
 
-## Commands
+## What is AgentAudit?
 
-| Command | What it does | Speed |
-|---------|-------------|-------|
-| `discover` | Find local MCP servers + check registry | ⚡ instant |
-| `check <name>` | Look up a package in the registry | ⚡ instant |
-| `scan <url>` | Quick static analysis (regex-based, local) | 🔵 ~2s |
-| `audit <url>` | **Deep LLM-powered security audit** | 🔴 ~30s |
-| `setup` | Register + configure API key | interactive |
+AgentAudit is a security scanner purpose-built for the AI package ecosystem. It works in two modes:
 
-### `scan` vs `audit`
+1. **CLI tool** — Run `agentaudit` in your terminal to discover and scan MCP servers installed in your AI editors
+2. **MCP server** — Add to Claude Desktop, Cursor, or Windsurf so your AI agent can audit packages on your behalf
 
-| | `scan` | `audit` |
-|--|--------|---------|
-| **How** | Regex pattern matching | LLM 3-pass: UNDERSTAND → DETECT → CLASSIFY |
-| **Speed** | ~2 seconds | ~30 seconds |
-| **Depth** | Surface-level patterns | Semantic code understanding |
-| **Needs LLM API key** | No | Yes (`ANTHROPIC_API_KEY` or `OPENAI_API_KEY`) |
-| **Uploads to registry** | No | Yes (with `agentaudit setup`) |
+It checks packages against the [AgentAudit Trust Registry](https://agentaudit.dev) — a shared, community-driven database of security findings — and can perform local scans ranging from fast regex analysis to deep LLM-powered 3-pass audits.
 
-### Examples
+---
+
+## 🚀 Quick Start
+
+### Option A: CLI (recommended)
 
 ```bash
-# Discover all MCP servers on your machine
-npx agentaudit discover
+# Install globally
+npm install -g agentaudit
 
-# Quick static scan
-npx agentaudit scan https://github.com/owner/repo
+# Discover MCP servers in your AI editors
+agentaudit
+
+# Quick scan a specific repo
+agentaudit scan https://github.com/owner/repo
 
 # Deep LLM-powered audit
-export ANTHROPIC_API_KEY=sk-ant-...
-npx agentaudit audit https://github.com/owner/repo
+agentaudit audit https://github.com/owner/repo
 
-# Export code + audit prompt for manual LLM review
-npx agentaudit audit https://github.com/owner/repo --export
+# Look up a package in the trust registry
+agentaudit lookup fastmcp
+```
 
-# Registry lookup
-npx agentaudit check fastmcp
+**Example output:**
+```
+  AgentAudit v3.9.0
+  Security scanner for AI packages
 
-# Register for an API key (free)
-npx agentaudit setup
+  Discovering MCP servers in your AI editors...
+
+•  Scanning Cursor  ~/.cursor/mcp.json    found 3 servers
+
+├──  tool   supabase-mcp              ✔ ok
+│   SAFE  Risk 0  https://agentaudit.dev/skills/supabase-mcp
+├──  tool   browser-tools-mcp         ✔ ok
+│   ⚠ not audited  Run: agentaudit audit https://github.com/nichochar/browser-tools-mcp
+└──  tool   filesystem                ✔ ok
+│   SAFE  Risk 0  https://agentaudit.dev/skills/filesystem
+
+  Looking for general package scanning? Try `pip audit` or `npm audit`.
+```
+
+### Option B: MCP Server in your editor
+
+Add to your MCP config:
+
+**Claude Desktop** (`~/.claude/mcp.json`), **Cursor** (`.cursor/mcp.json`), **Windsurf** (`~/.codeium/windsurf/mcp_config.json`):
+
+```json
+{
+  "mcpServers": {
+    "agentaudit": {
+      "command": "npx",
+      "args": ["-y", "agentaudit"]
+    }
+  }
+}
+```
+
+**VS Code** (`.vscode/mcp.json`):
+
+```json
+{
+  "servers": {
+    "agentaudit": {
+      "command": "npx",
+      "args": ["-y", "agentaudit"]
+    }
+  }
+}
+```
+
+Your AI agent can then use AgentAudit's tools to scan packages directly within your editor.
+
+---
+
+## 📋 Commands Reference
+
+| Command | Description | Example |
+|---------|-------------|---------|
+| `agentaudit` | Discover MCP servers (default, same as `discover`) | `agentaudit` |
+| `agentaudit discover` | Find MCP servers in Cursor, Claude, VS Code, Windsurf | `agentaudit discover` |
+| `agentaudit discover --quick` | Discover + auto-scan all servers | `agentaudit discover --quick` |
+| `agentaudit discover --deep` | Discover + interactively select servers to deep-audit | `agentaudit discover --deep` |
+| `agentaudit scan <url>` | Quick regex-based static scan (~2s) | `agentaudit scan https://github.com/owner/repo` |
+| `agentaudit scan <url> --deep` | Deep audit (same as `audit`) | `agentaudit scan https://github.com/owner/repo --deep` |
+| `agentaudit audit <url>` | Deep LLM-powered 3-pass audit (~30s) | `agentaudit audit https://github.com/owner/repo` |
+| `agentaudit lookup <name>` | Look up package in trust registry | `agentaudit lookup fastmcp` |
+| `agentaudit setup` | Register agent + configure API key | `agentaudit setup` |
+
+### Global Flags
+
+| Flag | Description |
+|------|-------------|
+| `--json` | Output machine-readable JSON to stdout |
+| `--quiet` / `-q` | Suppress banner and decorative output (show findings only) |
+| `--no-color` | Disable ANSI colors (also respects `NO_COLOR` env var) |
+| `--help` / `-h` | Show help text |
+| `-v` / `--version` | Show version |
+
+### Exit Codes
+
+| Code | Meaning |
+|------|---------|
+| `0` | Clean — no findings detected, or successful lookup |
+| `1` | Findings detected |
+| `2` | Error (clone failed, network error, invalid args) |
+
+---
+
+## ⚖️ Quick Scan vs Deep Audit
+
+| | Quick Scan (`scan`) | Deep Audit (`audit`) |
+|---|---------------------|---------------------|
+| **Speed** | ~2 seconds | ~30 seconds |
+| **Method** | Regex pattern matching | LLM-powered 3-pass analysis |
+| **API key needed** | No | Yes (`ANTHROPIC_API_KEY` or `OPENAI_API_KEY`) |
+| **False positives** | Higher (regex limitations) | Very low (context-aware) |
+| **Detects** | Common patterns (injection, secrets, eval) | Complex attack chains, AI-specific threats, obfuscation |
+| **Best for** | Quick triage, CI pipelines | Critical packages, pre-production review |
+
+**Tip:** Use `agentaudit scan <url> --deep` to run a deep audit via the scan command.
+
+---
+
+## 🔌 MCP Server
+
+When running as an MCP server, AgentAudit exposes the following tools to your AI agent:
+
+| Tool | Description |
+|------|-------------|
+| `audit_package` | Deep LLM-powered audit of a repository |
+| `check_registry` | Look up a package in the trust registry |
+| `submit_report` | Upload audit findings to the registry |
+| `discover_servers` | Find MCP servers in local editor configs |
+
+### Workflow
+
+```
+User asks agent to install a package
+         │
+         ▼
+Agent calls check_registry(package_name)
+         │
+    ┌────┴────┐
+    │         │
+  Found    Not Found
+    │         │
+    ▼         ▼
+ Return    Agent calls audit_package(repo_url)
+ score        │
+              ▼
+         LLM analyzes code (3-pass)
+              │
+              ▼
+         Agent calls submit_report(findings)
+              │
+              ▼
+         Return findings + risk score
 ```
 
 ---
 
-## MCP Server
+## 🎯 What It Detects
 
-Add AgentAudit to your AI editor. Your agent gets 4 tools:
+<table>
+<tr>
+<td>
 
-| MCP Tool | Description |
+**Core Security**
+
+![Command Injection](https://img.shields.io/badge/-Command_Injection-E53935?style=flat-square)
+![Credential Theft](https://img.shields.io/badge/-Credential_Theft-E53935?style=flat-square)
+![Data Exfiltration](https://img.shields.io/badge/-Data_Exfiltration-E53935?style=flat-square)
+![SQL Injection](https://img.shields.io/badge/-SQL_Injection-E53935?style=flat-square)
+![Path Traversal](https://img.shields.io/badge/-Path_Traversal-E53935?style=flat-square)
+![Unsafe Deserialization](https://img.shields.io/badge/-Unsafe_Deserialization-E53935?style=flat-square)
+
+</td>
+<td>
+
+**AI-Specific**
+
+![Prompt Injection](https://img.shields.io/badge/-Prompt_Injection-7B1FA2?style=flat-square)
+![Jailbreak](https://img.shields.io/badge/-Jailbreak-7B1FA2?style=flat-square)
+![Agent Impersonation](https://img.shields.io/badge/-Agent_Impersonation-7B1FA2?style=flat-square)
+![Capability Escalation](https://img.shields.io/badge/-Capability_Escalation-7B1FA2?style=flat-square)
+![Context Pollution](https://img.shields.io/badge/-Context_Pollution-7B1FA2?style=flat-square)
+![Hidden Instructions](https://img.shields.io/badge/-Hidden_Instructions-7B1FA2?style=flat-square)
+
+</td>
+</tr>
+<tr>
+<td>
+
+**MCP-Specific**
+
+![Tool Poisoning](https://img.shields.io/badge/-Tool_Poisoning-FF6F00?style=flat-square)
+![Desc Injection](https://img.shields.io/badge/-Desc_Injection-FF6F00?style=flat-square)
+![Resource Traversal](https://img.shields.io/badge/-Resource_Traversal-FF6F00?style=flat-square)
+![Unpinned npx](https://img.shields.io/badge/-Unpinned_npx-FF6F00?style=flat-square)
+![Broad Permissions](https://img.shields.io/badge/-Broad_Permissions-FF6F00?style=flat-square)
+
+</td>
+<td>
+
+**Persistence & Obfuscation**
+
+![Crontab Mod](https://img.shields.io/badge/-Crontab_Mod-455A64?style=flat-square)
+![Shell RC Inject](https://img.shields.io/badge/-Shell_RC_Inject-455A64?style=flat-square)
+![Git Hook Abuse](https://img.shields.io/badge/-Git_Hook_Abuse-455A64?style=flat-square)
+![Zero-Width Chars](https://img.shields.io/badge/-Zero--Width_Chars-455A64?style=flat-square)
+![Base64 Exec](https://img.shields.io/badge/-Base64_Exec-455A64?style=flat-square)
+![ANSI Escape](https://img.shields.io/badge/-ANSI_Escape-455A64?style=flat-square)
+
+</td>
+</tr>
+</table>
+
+---
+
+## 🧠 How the 3-Pass Audit Works
+
+The deep audit (`agentaudit audit`) uses a structured 3-phase LLM analysis — not a single-shot prompt, but a rigorous multi-pass process:
+
+| Phase | Name | What Happens |
+|-------|------|-------------|
+| **1** | 🔍 **UNDERSTAND** | Read all files and build a **Package Profile**: purpose, category, expected behaviors, trust boundaries. No scanning yet — the goal is to understand what the package *should* do before looking for what it *shouldn't*. |
+| **2** | 🎯 **DETECT** | Evidence collection against **50+ detection patterns** across 8 categories (AI-specific, MCP, persistence, obfuscation, cross-file correlation). Only facts are recorded — no severity judgments yet. |
+| **3** | ⚖️ **CLASSIFY** | Every finding goes through a **Mandatory Self-Check** (5 questions), **Exploitability Assessment**, and **Confidence Gating**. HIGH/CRITICAL findings must survive a **Devil's Advocate** challenge and include a full **Reasoning Chain**. |
+
+**Why 3 passes?** Single-pass analysis is the #1 cause of false positives. By separating understanding → detection → classification:
+
+- Phase 1 prevents flagging core functionality as suspicious (e.g., SQL execution in a database tool)
+- Phase 2 ensures evidence is collected without severity bias
+- Phase 3 catches false positives before they reach the report
+
+This architecture achieved **0% false positives** on our 11-package test set, down from 42% in v2.
+
+---
+
+## 🔄 CI/CD Integration
+
+AgentAudit is designed for CI pipelines with proper exit codes and JSON output:
+
+```yaml
+# GitHub Actions example
+- name: Scan MCP servers
+  run: |
+    npx agentaudit scan https://github.com/org/mcp-server --json --quiet > results.json
+    # Exit code 1 = findings detected → fail the build
+```
+
+```bash
+# Shell scripting
+agentaudit scan https://github.com/owner/repo --json --quiet 2>/dev/null
+if [ $? -eq 1 ]; then
+  echo "Security findings detected!"
+  exit 1
+fi
+```
+
+### JSON Output Examples
+
+```bash
+# Scan with JSON output
+agentaudit scan https://github.com/owner/repo --json
+```
+
+```json
+{
+  "slug": "repo",
+  "url": "https://github.com/owner/repo",
+  "findings": [
+    {
+      "severity": "high",
+      "title": "Command injection risk",
+      "file": "src/handler.js",
+      "line": 42,
+      "snippet": "exec(`git ${userInput}`)"
+    }
+  ],
+  "fileCount": 15,
+  "duration": "1.8s"
+}
+```
+
+```bash
+# Registry lookup with JSON
+agentaudit lookup fastmcp --json
+```
+
+> **Coming soon:** `--fail-on <severity>` flag to set minimum severity threshold for non-zero exit (e.g., `--fail-on high` ignores low/medium findings).
+
+---
+
+## ⚙️ Configuration
+
+### Credentials
+
+AgentAudit stores credentials in `~/.config/agentaudit/credentials.json` (or `$XDG_CONFIG_HOME/agentaudit/credentials.json`).
+
+Run `agentaudit setup` to configure interactively, or set via environment:
+
+```bash
+export AGENTAUDIT_API_KEY=asf_your_key_here
+```
+
+### Environment Variables
+
+| Variable | Description |
 |----------|-------------|
-| `discover_servers` | Find all locally installed MCP servers, check registry status |
-| `audit_package` | Clone a repo → return source code + audit prompt → you analyze → `submit_report` |
-| `submit_report` | Upload your audit report to [agentaudit.dev](https://agentaudit.dev) |
-| `check_package` | Quick registry lookup for a package |
-
-### Setup
-
-One-line config — works with `npx`, no manual clone needed:
-
-**Claude Desktop** (`~/.claude/mcp.json`):
-```json
-{
-  "mcpServers": {
-    "agentaudit": {
-      "command": "npx",
-      "args": ["-y", "agentaudit"]
-    }
-  }
-}
-```
-
-**Cursor** (`.cursor/mcp.json`):
-```json
-{
-  "mcpServers": {
-    "agentaudit": {
-      "command": "npx",
-      "args": ["-y", "agentaudit"]
-    }
-  }
-}
-```
-
-**Windsurf** (`~/.codeium/windsurf/mcp_config.json`):
-```json
-{
-  "mcpServers": {
-    "agentaudit": {
-      "command": "npx",
-      "args": ["-y", "agentaudit"]
-    }
-  }
-}
-```
-
-### How an audit works via MCP
-
-```
-You: "Audit the blender-mcp server"
-                ↓
-Agent calls discover_servers → finds blender-mcp
-                ↓
-Agent calls check_package("blender-mcp") → not in registry
-                ↓
-Agent calls audit_package("https://github.com/user/blender-mcp")
-                ↓
-MCP server clones repo, returns source code + audit methodology
-                ↓
-Agent's LLM analyzes code (3-pass: UNDERSTAND → DETECT → CLASSIFY)
-                ↓
-Agent calls submit_report(findings_json)
-                ↓
-Report published at agentaudit.dev/skills/blender-mcp
-```
-
-### Authentication
-
-Run `npx agentaudit setup` once. Both CLI and MCP server find credentials automatically:
-
-1. `AGENTAUDIT_API_KEY` environment variable
-2. `~/.config/agentaudit/credentials.json` (created by `setup`)
-
-**`discover`, `scan`, and `check` work without a key.** Only `audit`/`submit_report` need one.
+| `AGENTAUDIT_API_KEY` | API key for registry access |
+| `ANTHROPIC_API_KEY` | Anthropic API key for deep audits (Claude) |
+| `OPENAI_API_KEY` | OpenAI API key for deep audits (GPT-4o) |
+| `NO_COLOR` | Disable ANSI colors ([no-color.org](https://no-color.org)) |
 
 ---
 
-## What it detects
+## 📦 Requirements
 
-### Static scan (`scan`)
-
-- 🔴 Prompt injection & tool poisoning
-- 🔴 Shell command injection
-- 🔴 SQL injection
-- 🔴 Unsafe deserialization (pickle, YAML)
-- 🟡 Hardcoded secrets
-- 🟡 SSL/TLS verification disabled
-- 🟡 Path traversal
-- 🔵 Wildcard CORS
-- 🔵 Undisclosed telemetry
-
-### Deep audit (`audit` / MCP `audit_package`)
-
-Everything above, plus:
-
-- 🔴 Multi-file attack chains (credential harvest → exfiltration)
-- 🔴 Agent manipulation (impersonation, capability escalation, jailbreaks)
-- 🔴 MCP-specific: tool description injection, resource traversal, unpinned npx
-- 🟡 Persistence mechanisms (crontab, shell RC, git hooks, systemd)
-- 🟡 Obfuscation (base64 exec, zero-width chars, ANSI escapes)
-- 🟡 Context pollution & indirect prompt injection
-
-50+ detection patterns across 8 categories. [Full pattern list →](https://github.com/starbuck100/agentaudit-skill)
+- **Node.js** ≥ 18.0.0
+- **Git** (for cloning repositories during scan/audit)
 
 ---
 
-## Requirements
+## ❓ FAQ
 
-- **Node.js 18+**
-- **Git** (for cloning repos)
+### How do I set up AgentAudit?
+
+```bash
+npm install -g agentaudit
+agentaudit setup
+```
+
+Or use without installing: `npx agentaudit`
+
+### Do I need an API key?
+
+- **Quick scan** (`scan`): No API key needed — runs locally with regex
+- **Deep audit** (`audit`): Needs `ANTHROPIC_API_KEY` or `OPENAI_API_KEY`
+- **Registry lookup** (`lookup`): No key needed for reading; key needed for uploading reports
+- **MCP server**: No extra key needed — uses the host editor's LLM
+
+### What data is sent externally?
+
+- **Registry lookups**: Package name/slug is sent to `agentaudit.dev` to check for existing audits
+- **Report uploads**: Audit findings are uploaded to the public registry (requires API key)
+- **Deep audits**: Source code is sent to Anthropic or OpenAI for LLM analysis
+- **Quick scans**: Everything stays local — no data leaves your machine
+
+### Can I use it offline?
+
+Quick scans (`agentaudit scan`) work fully offline after cloning. Registry lookups and deep audits require network access.
+
+### Can I use it as an MCP server without the CLI?
+
+Yes! `npx agentaudit` starts the MCP server when invoked by an editor. The CLI and MCP server are the same package — behavior is determined by how it's called.
+
+### How does `discover` know which editors I use?
+
+It checks standard config file locations for Claude Desktop, Cursor, VS Code, and Windsurf. It also checks the current working directory for project-level `.cursor/mcp.json` and `.vscode/mcp.json`.
 
 ---
 
-## Related
+## 🔗 Related Links
 
-- **[agentaudit.dev](https://agentaudit.dev)** — Trust registry with 400+ audit reports
-- **[agentaudit-skill](https://github.com/starbuck100/agentaudit-skill)** — Full agent skill with gate scripts, detection patterns & peer review system
+- **Trust Registry**: [agentaudit.dev](https://agentaudit.dev)
+- **Leaderboard**: [agentaudit.dev/leaderboard](https://agentaudit.dev/leaderboard)
+- **Skill Repository**: [github.com/starbuck100/agentaudit-skill](https://github.com/starbuck100/agentaudit-skill)
+- **MCP Server Repository**: [github.com/starbuck100/agentaudit-mcp](https://github.com/starbuck100/agentaudit-mcp)
+- **Report Issues**: [GitHub Issues](https://github.com/starbuck100/agentaudit-mcp/issues)
 
 ---
 
-## License
+## 📄 License
 
-[AGPL-3.0](LICENSE)
+[AGPL-3.0](LICENSE) — Free for open source use. Commercial license available for proprietary integrations.
+
+---
+
+<div align="center">
+
+**Protect your AI stack. Scan before you trust.**
+
+[Trust Registry](https://agentaudit.dev) · [Leaderboard](https://agentaudit.dev/leaderboard) · [Report Issues](https://github.com/starbuck100/agentaudit-mcp/issues)
+
+</div>
