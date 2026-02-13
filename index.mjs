@@ -25,6 +25,7 @@ import {
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 import { execSync } from 'child_process';
 import { fileURLToPath } from 'url';
@@ -124,9 +125,9 @@ function collectFiles(dir, basePath = '', collected = [], totalSize = { bytes: 0
 // ── Repo Helpers ────────────────────────────────────────
 
 function cloneRepo(sourceUrl) {
-  const tmpDir = fs.mkdtempSync('/tmp/agentaudit-');
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentaudit-'));
   try {
-    execSync(`git clone --depth 1 "${sourceUrl}" "${tmpDir}/repo" 2>/dev/null`, {
+    execSync(`git clone --depth 1 "${sourceUrl}" "${tmpDir}/repo"`, {
       timeout: 30_000, stdio: 'pipe',
     });
     return path.join(tmpDir, 'repo');
@@ -136,7 +137,7 @@ function cloneRepo(sourceUrl) {
 }
 
 function cleanupRepo(repoPath) {
-  try { execSync(`rm -rf "${path.dirname(repoPath)}"`, { stdio: 'pipe' }); } catch {}
+  try { fs.rmSync(path.dirname(repoPath), { recursive: true, force: true }); } catch {}
 }
 
 function slugFromUrl(url) {

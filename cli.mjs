@@ -14,6 +14,7 @@
  */
 
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 import { execSync } from 'child_process';
 import { createInterface } from 'readline';
@@ -573,15 +574,18 @@ async function scanRepo(url) {
   process.stdout.write(`${icons.scan}  Scanning ${c.bold}${slug}${c.reset} ${c.dim}...${c.reset}`);
   
   // Clone
-  const tmpDir = fs.mkdtempSync('/tmp/agentaudit-');
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentaudit-'));
   const repoPath = path.join(tmpDir, 'repo');
   try {
-    execSync(`git clone --depth 1 "${url}" "${repoPath}" 2>/dev/null`, {
+    execSync(`git clone --depth 1 "${url}" "${repoPath}"`, {
       timeout: 30_000,
       stdio: 'pipe',
     });
   } catch (err) {
     process.stdout.write(`  ${c.red}✖ clone failed${c.reset}\n`);
+    const msg = err.stderr?.toString().trim() || err.message?.split('\n')[0] || '';
+    if (msg) console.log(`    ${c.dim}${msg}${c.reset}`);
+    console.log(`    ${c.dim}Make sure git is installed and the URL is accessible.${c.reset}`);
     return null;
   }
   
@@ -598,7 +602,7 @@ async function scanRepo(url) {
   const registryData = await checkRegistry(slug);
   
   // Cleanup
-  try { execSync(`rm -rf "${tmpDir}"`, { stdio: 'pipe' }); } catch {}
+  try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
   
   const duration = elapsed(start);
   
@@ -937,15 +941,18 @@ async function auditRepo(url) {
   
   // Step 1: Clone
   process.stdout.write(`  ${c.dim}[1/4]${c.reset} Cloning repository...`);
-  const tmpDir = fs.mkdtempSync('/tmp/agentaudit-');
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentaudit-'));
   const repoPath = path.join(tmpDir, 'repo');
   try {
-    execSync(`git clone --depth 1 "${url}" "${repoPath}" 2>/dev/null`, {
+    execSync(`git clone --depth 1 "${url}" "${repoPath}"`, {
       timeout: 30_000, stdio: 'pipe',
     });
     console.log(` ${c.green}done${c.reset}`);
-  } catch {
+  } catch (err) {
     console.log(` ${c.red}failed${c.reset}`);
+    const msg = err.stderr?.toString().trim() || err.message?.split('\n')[0] || '';
+    if (msg) console.log(`    ${c.dim}${msg}${c.reset}`);
+    console.log(`    ${c.dim}Make sure git is installed and the URL is accessible.${c.reset}`);
     return null;
   }
   
@@ -1023,7 +1030,7 @@ async function auditRepo(url) {
     }
     
     // Cleanup
-    try { execSync(`rm -rf "${tmpDir}"`, { stdio: 'pipe' }); } catch {}
+    try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
     return null;
   }
   
@@ -1097,12 +1104,12 @@ async function auditRepo(url) {
   } catch (err) {
     console.log(` ${c.red}failed${c.reset}`);
     console.log(`  ${c.red}${err.message}${c.reset}`);
-    try { execSync(`rm -rf "${tmpDir}"`, { stdio: 'pipe' }); } catch {}
+    try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
     return null;
   }
   
   // Cleanup repo
-  try { execSync(`rm -rf "${tmpDir}"`, { stdio: 'pipe' }); } catch {}
+  try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
   
   if (!report) {
     console.log(`  ${c.red}Could not parse LLM response as JSON${c.reset}`);
@@ -1188,6 +1195,11 @@ async function checkPackage(name) {
 
 async function main() {
   const args = process.argv.slice(2);
+  
+  if (args[0] === '-v' || args[0] === '--version') {
+    console.log(`agentaudit ${getVersion()}`);
+    process.exit(0);
+  }
   
   if (args.length === 0 || args[0] === '--help' || args[0] === '-h') {
     banner();
