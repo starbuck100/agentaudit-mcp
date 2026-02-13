@@ -49,19 +49,19 @@ It checks packages against the [AgentAudit Trust Registry](https://agentaudit.de
 ### Option A: CLI (recommended)
 
 ```bash
-# Install globally
+# Install globally (or use npx agentaudit)
 npm install -g agentaudit
 
-# Discover MCP servers in your AI editors
+# Discover MCP servers configured in your AI editors
 agentaudit
 
-# Quick scan a specific repo
+# Quick scan — clones repo, checks code with regex patterns (~2s)
 agentaudit scan https://github.com/owner/repo
 
-# Deep LLM-powered audit
+# Deep audit — clones repo, sends code to LLM for 3-pass analysis (~30s)
 agentaudit audit https://github.com/owner/repo
 
-# Look up a package in the trust registry
+# Registry lookup — check if a package has been audited before (no cloning)
 agentaudit lookup fastmcp
 ```
 
